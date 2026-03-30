@@ -1,0 +1,2559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GroupAllocator</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0a0d12; color: #d4d4dc; min-height: 100vh; }
+
+  /* ===== HEADER ===== */
+  .app-header {
+    background: linear-gradient(135deg, #111827 0%, #0f172a 60%, #131a2e 100%);
+    padding: 20px 28px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: space-between;
+    position: relative;
+  }
+  .app-header::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99,102,241,0.3) 30%, rgba(168,85,247,0.2) 70%, transparent);
+  }
+  .app-header h1 {
+    font-size: 1.4rem; font-weight: 700; color: #f1f1f5;
+    letter-spacing: -0.025em;
+    background: linear-gradient(135deg, #f1f1f5 60%, #a5b4fc);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .app-header .subtitle { color: #555878; font-size: 0.78rem; margin-top: 3px; letter-spacing: 0.01em; }
+  .header-badge {
+    background: rgba(99,102,241,0.1); color: #818cf8; font-size: 0.72rem;
+    padding: 5px 12px; border-radius: 20px; font-weight: 500;
+    border: 1px solid rgba(99,102,241,0.12);
+  }
+
+  .main-layout { display: flex; height: calc(100vh - 74px); }
+
+  /* ===== SIDEBAR ===== */
+  .sidebar {
+    width: 300px; min-width: 300px;
+    background: linear-gradient(180deg, #0e1118 0%, #0c0f16 100%);
+    border-right: 1px solid rgba(255,255,255,0.04);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .sidebar-section { padding: 18px 16px; border-bottom: 1px solid rgba(255,255,255,0.035); }
+  .sidebar-section h3 {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em;
+    color: #454868; margin-bottom: 12px; font-weight: 600;
+  }
+
+  .input-group { margin-bottom: 10px; }
+  .input-group label { display: block; font-size: 0.73rem; color: #5e6280; margin-bottom: 5px; font-weight: 500; }
+  .input-group input, .input-group select, .input-group textarea {
+    width: 100%; padding: 8px 11px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.025); color: #d4d4dc; font-size: 0.84rem; outline: none;
+    font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .input-group input:focus, .input-group textarea:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+  .input-group textarea { resize: vertical; min-height: 80px; }
+
+  /* ===== BUTTONS ===== */
+  .btn {
+    padding: 8px 16px; border-radius: 9px; border: none; font-size: 0.8rem;
+    cursor: pointer; font-weight: 500; transition: all 0.2s ease; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 5px;
+    position: relative; overflow: hidden;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff; }
+  .btn-primary:hover { background: linear-gradient(135deg, #7577f5, #8b5cf6); box-shadow: 0 4px 16px rgba(99,102,241,0.3); }
+  .btn-secondary { background: rgba(255,255,255,0.05); color: #8b8fb0; border: 1px solid rgba(255,255,255,0.07); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.09); color: #c4c8e0; }
+  .btn-danger { background: rgba(239,68,68,0.12); color: #f87171; border: 1px solid rgba(239,68,68,0.15); }
+  .btn-danger:hover { background: rgba(239,68,68,0.22); }
+  .btn-success { background: linear-gradient(135deg, #059669, #10b981); color: #fff; }
+  .btn-success:hover { background: linear-gradient(135deg, #10b981, #34d399); box-shadow: 0 4px 16px rgba(16,185,129,0.25); }
+  .btn-sm { padding: 5px 11px; font-size: 0.72rem; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .toggle-row {
+    display: flex; border-radius: 11px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.07); background: rgba(0,0,0,0.3);
+    padding: 3px; gap: 3px;
+  }
+  .toggle-btn {
+    flex: 1; padding: 8px 10px; border: none; background: transparent;
+    color: #454868; font-size: 0.76rem; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: all 0.25s; border-radius: 8px;
+  }
+  .toggle-btn.active {
+    background: linear-gradient(135deg, #6366f1, #7c3aed); color: #fff;
+    box-shadow: 0 2px 10px rgba(99,102,241,0.35);
+  }
+  .toggle-btn:hover:not(.active) { background: rgba(255,255,255,0.05); color: #8b8fb0; }
+
+  /* ===== STUDENT LIST ===== */
+  .student-list { list-style: none; max-height: 240px; overflow-y: auto; }
+  .student-list li {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 8px; margin-bottom: 1px;
+    background: transparent; font-size: 0.82rem;
+    transition: background 0.15s;
+  }
+  .student-list li:hover { background: rgba(99,102,241,0.06); }
+  .student-list li .name { flex: 1; color: #b8bcd4; }
+  .student-list li .pref-count { font-size: 0.68rem; color: #4b5072; margin-right: 8px; font-weight: 500; letter-spacing: 0.02em; }
+  .student-list li .remove-btn {
+    background: none; border: none; color: #3a2020; cursor: pointer; font-size: 0.9rem;
+    padding: 0 4px; opacity: 0; transition: all 0.15s;
+  }
+  .student-list li:hover .remove-btn { opacity: 0.6; }
+  .student-list li .remove-btn:hover { opacity: 1; color: #f87171; }
+
+  /* ===== PREF EDITOR ===== */
+  .pref-editor { margin-top: 6px; }
+  .pref-row {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 0.82rem;
+  }
+  .pref-row select {
+    flex: 1; padding: 5px 8px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03); color: #d4d4dc; font-size: 0.82rem; font-family: inherit;
+  }
+  .pref-badge-pos {
+    background: rgba(16,185,129,0.12); color: #34d399; padding: 3px 10px;
+    border-radius: 20px; font-size: 0.75rem; font-weight: 500;
+  }
+  .pref-badge-neg {
+    background: rgba(239,68,68,0.12); color: #f87171; padding: 3px 10px;
+    border-radius: 20px; font-size: 0.75rem; font-weight: 500;
+  }
+
+  /* ===== MAIN CONTENT ===== */
+  .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #0a0d12; }
+
+  .tabs {
+    display: flex; background: rgba(255,255,255,0.015);
+    border-bottom: 1px solid rgba(255,255,255,0.04); padding: 0 20px;
+  }
+  .tab {
+    padding: 12px 22px; cursor: pointer; font-size: 0.82rem; color: #454868;
+    border-bottom: 2px solid transparent; transition: all 0.2s; font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .tab:hover { color: #8b8fb0; }
+  .tab.active { color: #a5b4fc; border-bottom-color: #6366f1; }
+
+  .tab-content { flex: 1; overflow-y: auto; padding: 22px 26px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ===== GROUPS VIEW ===== */
+  .groups-controls {
+    margin-bottom: 18px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .groups-controls .hint {
+    font-size: 0.73rem; color: #454868;
+    background: rgba(255,255,255,0.025); padding: 6px 14px; border-radius: 20px;
+    border: 1px solid rgba(255,255,255,0.04);
+  }
+  .groups-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 16px;
+  }
+
+  .group-card {
+    border-radius: 16px; padding: 18px; min-height: 100px;
+    border: 2px solid transparent;
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+    position: relative;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .group-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  }
+  .group-card.drag-over {
+    border-color: rgba(99,102,241,0.5);
+    box-shadow: 0 0 28px rgba(99,102,241,0.15);
+    transform: scale(1.015);
+  }
+  .group-card h3 {
+    font-size: 0.82rem; margin-bottom: 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .group-card .group-count {
+    font-size: 0.66rem; opacity: 0.45; font-weight: 400;
+  }
+  .group-card .group-score {
+    font-size: 0.64rem; padding: 3px 9px; border-radius: 20px;
+    background: rgba(255,255,255,0.07); font-weight: 500; margin-left: auto;
+    letter-spacing: 0.02em;
+  }
+
+  /* ===== STUDENT CHIPS ===== */
+  .student-chip {
+    display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 22px;
+    margin: 3px; font-size: 0.78rem; cursor: grab; user-select: none;
+    transition: all 0.2s cubic-bezier(0.4,0,0.2,1); border: 2px solid transparent;
+    background: rgba(255,255,255,0.045); font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .student-chip:hover { background: rgba(255,255,255,0.09); transform: translateY(-1px); }
+  .student-chip:active { cursor: grabbing; transform: scale(0.95); }
+  .student-chip.selected {
+    border-color: #818cf8;
+    box-shadow: 0 0 14px rgba(99,102,241,0.3), 0 0 4px rgba(99,102,241,0.15);
+    background: rgba(99,102,241,0.12);
+  }
+  .student-chip.pref-positive {
+    background: rgba(16,185,129,0.2) !important;
+    border-color: #10b981 !important;
+    border-style: solid !important;
+    border-width: 2px !important;
+    box-shadow: 0 0 10px rgba(16,185,129,0.2);
+  }
+  .student-chip.pref-positive-in {
+    background: rgba(16,185,129,0.1) !important;
+    border-color: #10b981 !important;
+    border-style: dotted !important;
+    border-width: 2px !important;
+    box-shadow: 0 0 10px rgba(16,185,129,0.15);
+  }
+  .student-chip.pref-negative {
+    background: rgba(239,68,68,0.2) !important;
+    border-color: #ef4444 !important;
+    border-style: solid !important;
+    border-width: 2px !important;
+    box-shadow: 0 0 10px rgba(239,68,68,0.2);
+  }
+  .student-chip.pref-negative-in {
+    background: rgba(239,68,68,0.1) !important;
+    border-color: #ef4444 !important;
+    border-style: dotted !important;
+    border-width: 2px !important;
+    box-shadow: 0 0 10px rgba(239,68,68,0.15);
+  }
+  .student-chip .chip-dot {
+    width: 6px; height: 6px; border-radius: 50%; margin-right: 7px; flex-shrink: 0;
+  }
+
+  /* ===== DRAG SHAKE ANIMATION ===== */
+  @keyframes shake-positive {
+    0%, 100% { transform: translateX(0); }
+    15% { transform: translateX(-3px) rotate(-1deg); }
+    30% { transform: translateX(3px) rotate(1deg); }
+    45% { transform: translateX(-2px) rotate(-0.5deg); }
+    60% { transform: translateX(2px) rotate(0.5deg); }
+    75% { transform: translateX(-1px); }
+  }
+  @keyframes shake-negative {
+    0%, 100% { transform: translateX(0); }
+    10% { transform: translateX(-4px) rotate(-2deg); }
+    20% { transform: translateX(4px) rotate(2deg); }
+    30% { transform: translateX(-3px) rotate(-1.5deg); }
+    40% { transform: translateX(3px) rotate(1.5deg); }
+    50% { transform: translateX(-2px) rotate(-1deg); }
+    60% { transform: translateX(2px) rotate(1deg); }
+    70% { transform: translateX(-1px); }
+  }
+  @keyframes pulse-glow-green {
+    0%, 100% { box-shadow: 0 0 8px rgba(16,185,129,0.2); }
+    50% { box-shadow: 0 0 18px rgba(16,185,129,0.45); }
+  }
+  @keyframes pulse-glow-red {
+    0%, 100% { box-shadow: 0 0 8px rgba(239,68,68,0.2); }
+    50% { box-shadow: 0 0 18px rgba(239,68,68,0.45); }
+  }
+  .student-chip.drag-pref-positive {
+    background: rgba(16,185,129,0.22) !important;
+    border-color: #10b981 !important;
+    border-style: solid !important;
+    border-width: 2px !important;
+    animation: shake-positive 0.5s ease-in-out, pulse-glow-green 1.2s ease-in-out infinite 0.5s;
+    color: #34d399 !important;
+  }
+  .student-chip.drag-pref-positive-in {
+    background: rgba(16,185,129,0.12) !important;
+    border-color: #10b981 !important;
+    border-style: dotted !important;
+    border-width: 2px !important;
+    animation: shake-positive 0.5s ease-in-out, pulse-glow-green 1.2s ease-in-out infinite 0.5s;
+    color: #34d399 !important;
+  }
+  .student-chip.drag-pref-negative {
+    background: rgba(239,68,68,0.22) !important;
+    border-color: #ef4444 !important;
+    border-style: solid !important;
+    border-width: 2px !important;
+    animation: shake-negative 0.6s ease-in-out, pulse-glow-red 1.2s ease-in-out infinite 0.6s;
+    color: #f87171 !important;
+  }
+  .student-chip.drag-pref-negative-in {
+    background: rgba(239,68,68,0.12) !important;
+    border-color: #ef4444 !important;
+    border-style: dotted !important;
+    border-width: 2px !important;
+    animation: shake-negative 0.6s ease-in-out, pulse-glow-red 1.2s ease-in-out infinite 0.6s;
+    color: #f87171 !important;
+  }
+  .student-chip.drag-source {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+
+  /* ===== NETWORK VIEW ===== */
+  #network-container { width: 100%; height: 100%; min-height: 500px; position: relative; }
+  #network-svg { width: 100%; height: 100%; }
+  .network-legend {
+    position: absolute; top: 16px; right: 16px;
+    background: rgba(12,15,22,0.88); backdrop-filter: blur(12px);
+    padding: 14px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.06);
+    font-size: 0.73rem;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: #7a7d9a; }
+  .legend-line { width: 22px; height: 3px; border-radius: 2px; }
+
+  /* ===== INSIGHTS ===== */
+  .insights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 14px;
+  }
+  .insight-card {
+    background: rgba(255,255,255,0.018); border-radius: 14px; padding: 18px;
+    border: 1px solid rgba(255,255,255,0.04);
+    transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+  }
+  .insight-card:hover { border-color: rgba(255,255,255,0.08); box-shadow: 0 4px 12px rgba(0,0,0,0.15); transform: translateY(-1px); }
+  .insight-card h4 { font-size: 0.74rem; margin-bottom: 10px; color: #5e6280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+  .insight-card .value { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; }
+  .insight-card .detail { font-size: 0.76rem; color: #454868; margin-top: 5px; line-height: 1.5; }
+  .insight-card ul { list-style: none; margin-top: 8px; }
+  .insight-card li { padding: 5px 0; font-size: 0.8rem; border-bottom: 1px solid rgba(255,255,255,0.025); }
+  .insight-card li:last-child { border: none; }
+
+  .stat-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.05); margin-top: 12px; overflow: hidden; }
+  .stat-bar-fill { height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+
+  /* ===== MODAL ===== */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(8px);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: linear-gradient(180deg, #151a24 0%, #121720 100%);
+    border-radius: 18px; padding: 26px; width: 92%; max-width: 500px;
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.08);
+  }
+  .modal h3 { margin-bottom: 16px; font-size: 1.08rem; font-weight: 600; color: #e8e8f0; letter-spacing: -0.01em; }
+  .modal .close-modal {
+    float: right; background: none; border: none; color: #3a3d54; cursor: pointer;
+    font-size: 1.3rem; transition: color 0.2s;
+  }
+  .modal .close-modal:hover { color: #8b8fb0; }
+
+  .help-text { font-size: 0.75rem; color: #4b5072; margin-top: 4px; line-height: 1.5; }
+
+  /* ===== IMPORT MODAL ===== */
+  .modal-lg { max-width: 720px; max-height: 85vh; overflow-y: auto; }
+  .import-tabs {
+    display: flex; gap: 0; margin-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .import-tab {
+    padding: 9px 16px; cursor: pointer; font-size: 0.82rem; color: #4b5072;
+    border-bottom: 2px solid transparent; transition: all 0.15s; font-weight: 500;
+  }
+  .import-tab:hover { color: #9ca0b8; }
+  .import-tab.active { color: #818cf8; border-bottom-color: #6366f1; }
+  .import-panel { display: none; }
+  .import-panel.active { display: block; }
+
+  .file-drop-zone {
+    border: 2px dashed rgba(255,255,255,0.08); border-radius: 14px; padding: 36px;
+    text-align: center; color: #4b5072; cursor: pointer;
+    transition: all 0.2s; margin-bottom: 12px;
+  }
+  .file-drop-zone:hover, .file-drop-zone.drag-hover {
+    border-color: #6366f1; color: #818cf8;
+    background: rgba(99,102,241,0.04);
+  }
+  .file-drop-zone input[type="file"] { display: none; }
+
+  .preview-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin: 12px 0; }
+  .preview-table th {
+    background: rgba(255,255,255,0.03); padding: 7px 10px; text-align: left;
+    color: #6b6f8a; font-weight: 600; font-size: 0.72rem;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .preview-table td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .preview-table tr:hover td { background: rgba(99,102,241,0.03); }
+  .preview-scroll {
+    max-height: 300px; overflow-y: auto;
+    border: 1px solid rgba(255,255,255,0.06); border-radius: 8px;
+  }
+
+  .col-mapper { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+  .col-mapper label { font-size: 0.75rem; color: #6b6f8a; font-weight: 500; }
+  .col-mapper select {
+    width: 100%; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03); color: #d4d4dc;
+    font-size: 0.82rem; font-family: inherit;
+  }
+
+  .import-status { padding: 10px 14px; border-radius: 8px; margin-top: 12px; font-size: 0.82rem; }
+  .import-status.success { background: rgba(16,185,129,0.1); color: #34d399; border: 1px solid rgba(16,185,129,0.15); }
+  .import-status.error { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.15); }
+  .import-status.info { background: rgba(99,102,241,0.08); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.12); }
+
+  /* ===== FIX ERROR POPOVER ===== */
+  .fix-popover {
+    position: fixed; z-index: 200;
+    background: #1c2030; border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px; padding: 14px 16px; width: 280px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    animation: popIn 0.15s ease-out;
+  }
+  @keyframes popIn {
+    from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .fix-popover h4 { font-size: 0.78rem; color: #f87171; margin-bottom: 10px; font-weight: 600; }
+  .fix-popover .fix-label { font-size: 0.72rem; color: #6b6f8a; margin-bottom: 3px; font-weight: 500; }
+  .fix-popover input, .fix-popover select {
+    width: 100%; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.04); color: #d4d4dc;
+    font-size: 0.82rem; font-family: inherit; margin-bottom: 8px; outline: none;
+  }
+  .fix-popover input:focus { border-color: #6366f1; }
+  .fix-popover .fix-actions { display: flex; gap: 6px; margin-top: 4px; }
+  .fix-popover .fix-actions .btn { flex: 1; justify-content: center; }
+  .fix-suggestion {
+    padding: 5px 8px; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+    color: #a5b4fc; background: rgba(99,102,241,0.08); margin-bottom: 4px;
+    transition: background 0.1s; border: 1px solid transparent;
+  }
+  .fix-suggestion:hover { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.2); }
+  .fix-backdrop { position: fixed; inset: 0; z-index: 199; }
+
+  /* Clickable error names */
+  .err-clickable {
+    cursor: pointer; transition: all 0.1s;
+  }
+  .err-clickable:hover {
+    filter: brightness(1.3);
+    text-decoration: underline;
+  }
+
+  /* Confirm import modal */
+  .confirm-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px); z-index: 150; align-items: center; justify-content: center;
+  }
+  .confirm-overlay.show { display: flex; }
+  .confirm-box {
+    background: linear-gradient(180deg, #1c2030 0%, #181c28 100%);
+    border-radius: 16px; padding: 22px 26px; max-width: 440px; width: 90%;
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 20px 48px rgba(0,0,0,0.5);
+  }
+  .confirm-box h4 { color: #fbbf24; font-size: 0.98rem; margin-bottom: 10px; font-weight: 600; }
+  .confirm-box .issue-list { list-style: none; margin: 12px 0; font-size: 0.8rem; max-height: 200px; overflow-y: auto; }
+  .confirm-box .issue-list li { padding: 5px 0; color: #8b8fb0; border-bottom: 1px solid rgba(255,255,255,0.025); }
+  .confirm-box .confirm-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+  /* ===== SCROLLBAR ===== */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+
+  .empty-state { text-align: center; padding: 80px 20px; color: #2d3048; }
+  .empty-state h3 { font-size: 1.1rem; margin-bottom: 10px; color: #3a3d54; font-weight: 600; letter-spacing: -0.01em; }
+  .empty-state p { font-size: 0.84rem; line-height: 1.6; }
+
+  @media (max-width: 900px) {
+    .main-layout { flex-direction: column; height: auto; }
+    .sidebar { width: 100%; min-width: auto; max-height: 50vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div>
+    <h1>GroupAllocator</h1>
+    <div class="subtitle">Smart group formation based on student preferences</div>
+  </div>
+  <span class="header-badge" id="studentCountBadge">0 students</span>
+</div>
+
+<div class="main-layout">
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <h3>Students</h3>
+      <div class="input-group">
+        <div style="display:flex;gap:6px;">
+          <input type="text" id="newStudentName" placeholder="Add student name..." style="flex:1;" onkeydown="if(event.key==='Enter')addStudent()">
+          <button class="btn btn-primary btn-sm" onclick="addStudent()">Add</button>
+        </div>
+      </div>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button class="btn btn-secondary btn-sm" onclick="showImportModal()">Import Spreadsheet</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadDemo()">Demo</button>
+        <button class="btn btn-danger btn-sm" onclick="clearAll()">Clear</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <label style="font-size:0.68rem;color:#555878;white-space:nowrap;">Sort:</label>
+        <select id="studentSort" onchange="sortStudents()" style="flex:1;font-size:0.72rem;padding:3px 6px;">
+          <option value="added">Order Added</option>
+          <option value="first-asc">First Name A-Z</option>
+          <option value="first-desc">First Name Z-A</option>
+          <option value="last-asc">Last Name A-Z</option>
+          <option value="last-desc">Last Name Z-A</option>
+        </select>
+      </div>
+      <ul class="student-list" id="studentList"></ul>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Set Preferences</h3>
+      <div class="input-group">
+        <label>Select Student</label>
+        <select id="prefStudent" onchange="renderPrefEditor()">
+          <option value="">-- Choose student --</option>
+        </select>
+      </div>
+      <div id="prefEditorArea"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Group Settings</h3>
+      <div class="input-group">
+        <label>Allocate by</label>
+        <div class="toggle-row">
+          <button class="toggle-btn active" id="toggleNumGroups" onclick="setGroupMode('numGroups')">Number of Groups</button>
+          <button class="toggle-btn" id="toggleGroupSize" onclick="setGroupMode('groupSize')">Group Size</button>
+        </div>
+      </div>
+      <div id="groupModeNumGroups" class="input-group">
+        <label>Number of Groups</label>
+        <input type="number" id="numGroups" value="4" min="2" max="20">
+      </div>
+      <div id="groupModeGroupSize" class="input-group" style="display:none;">
+        <label>Group size range</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="number" id="groupSizeMin" value="4" min="2" max="30" style="width:55px;text-align:center;" oninput="updateGroupSizeHint()">
+          <span style="color:#6b6f8a;font-size:0.85rem;font-weight:500;">to</span>
+          <input type="number" id="groupSizeMax" value="6" min="2" max="30" style="width:55px;text-align:center;" oninput="updateGroupSizeHint()">
+          <span style="color:#6b6f8a;font-size:0.78rem;margin-left:2px;">per group</span>
+        </div>
+        <div class="help-text" id="groupSizeHint" style="margin-top:6px;"></div>
+      </div>
+      <button class="btn btn-success" onclick="allocateGroups()" style="width:100%;margin-top:8px;">
+        Allocate Groups
+      </button>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="tabs">
+      <div class="tab active" data-tab="groups" onclick="switchTab('groups')">Groups</div>
+      <div class="tab" data-tab="network" onclick="switchTab('network')">Network</div>
+      <div class="tab" data-tab="insights" onclick="switchTab('insights')">Insights</div>
+    </div>
+
+    <div class="tab-content">
+      <div class="tab-panel active" id="panel-groups">
+        <div id="groupsView">
+          <div class="empty-state">
+            <h3>No groups yet</h3>
+            <p>Add students, set their preferences, then click "Allocate Groups".</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-network">
+        <div id="network-container">
+          <svg id="network-svg"></svg>
+          <div class="network-legend">
+            <div class="legend-item"><div class="legend-line" style="background:#10b981;"></div> Wants to work with</div>
+            <div class="legend-item"><div class="legend-line" style="background:#ef4444;"></div> Wants to avoid</div>
+            <div class="legend-item"><div class="legend-line" style="background:#10b981;height:5px;"></div> Mutual positive</div>
+            <div class="legend-item"><div class="legend-line" style="background:#ef4444;height:5px;"></div> Mutual negative</div>
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.73rem;color:#8b8fb0;">
+                <input type="checkbox" id="networkNameToggle" checked onchange="toggleNetworkNames()" style="accent-color:#6366f1;">
+                Show names
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel" id="panel-insights">
+        <div id="insightsView">
+          <div class="empty-state">
+            <h3>No data yet</h3>
+            <p>Allocate groups to see insights.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal-overlay" id="importModal">
+  <div class="modal modal-lg">
+    <button class="close-modal" onclick="hideImportModal()">&times;</button>
+    <h3>Import Students & Preferences</h3>
+
+    <div class="import-tabs">
+      <div class="import-tab active" onclick="switchImportTab('file')">Upload Excel / CSV</div>
+      <div class="import-tab" onclick="switchImportTab('paste')">Paste Data</div>
+      <div class="import-tab" onclick="switchImportTab('names')">Names Only</div>
+    </div>
+
+    <div class="import-panel active" id="import-file">
+      <div class="file-drop-zone" id="fileDropZone" onclick="document.getElementById('fileInput').click()"
+        ondragover="event.preventDefault();this.classList.add('drag-hover')"
+        ondragleave="this.classList.remove('drag-hover')"
+        ondrop="handleFileDrop(event);this.classList.remove('drag-hover')">
+        <div style="font-size:1.2rem;margin-bottom:6px;color:#6b6f8a;">Drop file here or click to browse</div>
+        <div style="font-size:0.78rem;">.xlsx, .xls, .csv, .tsv supported</div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.tsv" onchange="handleFileSelect(event)">
+      </div>
+      <div id="filePreview"></div>
+    </div>
+
+    <div class="import-panel" id="import-paste">
+      <div class="help-text" style="margin-bottom:8px;">
+        Paste tab-separated or comma-separated data from a spreadsheet. Include the header row.<br>
+        Separate multiple preference names with commas or semicolons within each cell.
+      </div>
+      <div class="input-group">
+        <textarea id="pasteData" rows="8" placeholder="Name&#9;Want to work with&#9;Want to avoid&#10;Alice&#9;Bob, Charlie&#9;Daniel&#10;Bob&#9;Alice&#9;Eve, Frank&#10;..." style="font-family:monospace;font-size:0.78rem;tab-size:16;"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="parsePastedData()">Parse Data</button>
+      <div id="pastePreview"></div>
+    </div>
+
+    <div class="import-panel" id="import-names">
+      <div class="input-group">
+        <label>Enter one student name per line</label>
+        <textarea id="bulkNames" rows="8" placeholder="Alice&#10;Bob&#10;Charlie&#10;..."></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="bulkImport()">Import Names</button>
+      </div>
+    </div>
+
+    <div id="importStatus"></div>
+  </div>
+</div>
+
+<!-- Fix Popover (rendered dynamically) -->
+<div id="fixPopoverRoot"></div>
+
+<!-- Confirm Import with Errors -->
+<div class="confirm-overlay" id="confirmImportOverlay">
+  <div class="confirm-box">
+    <h4>Import with issues?</h4>
+    <p style="font-size:0.82rem;color:#6b6f8a;margin-bottom:8px;">The following issues were found. Unmatched names will be skipped. You can go back and fix them, or import anyway.</p>
+    <ul class="issue-list" id="confirmIssueList"></ul>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" onclick="closeConfirmImport()">Go Back & Fix</button>
+      <button class="btn btn-success" id="confirmImportBtn">Import Anyway</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fresh or Append Import -->
+<div class="confirm-overlay" id="importModeOverlay">
+  <div class="confirm-box">
+    <h4>How would you like to import?</h4>
+    <p style="font-size:0.82rem;color:#6b6f8a;margin-bottom:12px;">You already have <strong id="existingCountLabel">0</strong> students loaded. Would you like to start fresh or add to the existing list?</p>
+    <div class="confirm-actions" style="gap:8px;">
+      <button class="btn btn-secondary" onclick="closeImportMode()">Cancel</button>
+      <button class="btn" id="importAppendBtn" style="background:#0ea5e9;color:#fff;">Add to Existing</button>
+      <button class="btn btn-success" id="importFreshBtn">Start Fresh</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============ STATE ============
+let students = [];
+let preferences = {};
+let groups = [];
+let groupNames = [];   // custom names per group index
+let lockedGroups = [];  // boolean per group index
+let lockedStudents = new Set(); // individually locked student IDs
+let selectedStudentId = null;
+let draggedStudentId = null;
+let idCounter = 0;
+let networkShowNames = true;
+
+const GROUP_COLORS = [
+  'rgba(99,102,241,0.12)', 'rgba(16,185,129,0.12)', 'rgba(245,158,11,0.12)',
+  'rgba(239,68,68,0.12)', 'rgba(168,85,247,0.12)', 'rgba(14,165,233,0.12)',
+  'rgba(236,72,153,0.12)', 'rgba(34,197,94,0.12)', 'rgba(251,146,60,0.12)',
+  'rgba(99,102,241,0.10)', 'rgba(20,184,166,0.12)', 'rgba(244,63,94,0.12)',
+  'rgba(59,130,246,0.12)', 'rgba(132,204,22,0.12)', 'rgba(217,70,239,0.12)',
+  'rgba(249,115,22,0.12)', 'rgba(6,182,212,0.12)', 'rgba(225,29,72,0.12)',
+  'rgba(79,70,229,0.12)', 'rgba(22,163,74,0.12)'
+];
+const GROUP_BORDERS = [
+  'rgba(99,102,241,0.22)', 'rgba(16,185,129,0.22)', 'rgba(245,158,11,0.22)',
+  'rgba(239,68,68,0.22)', 'rgba(168,85,247,0.22)', 'rgba(14,165,233,0.22)',
+  'rgba(236,72,153,0.22)', 'rgba(34,197,94,0.22)', 'rgba(251,146,60,0.22)',
+  'rgba(99,102,241,0.18)', 'rgba(20,184,166,0.22)', 'rgba(244,63,94,0.22)',
+  'rgba(59,130,246,0.22)', 'rgba(132,204,22,0.22)', 'rgba(217,70,239,0.22)',
+  'rgba(249,115,22,0.22)', 'rgba(6,182,212,0.22)', 'rgba(225,29,72,0.22)',
+  'rgba(79,70,229,0.22)', 'rgba(22,163,74,0.22)'
+];
+const GROUP_TEXT_COLORS = [
+  '#a5b4fc', '#6ee7b7', '#fcd34d', '#fca5a5', '#c4b5fd', '#7dd3fc',
+  '#f9a8d4', '#86efac', '#fdba74', '#a5b4fc', '#5eead4', '#fda4af',
+  '#93c5fd', '#bef264', '#e879f9', '#fb923c', '#67e8f9', '#fb7185',
+  '#a78bfa', '#4ade80'
+];
+const GROUP_DOT_COLORS = [
+  '#6366f1', '#10b981', '#f59e0b', '#ef4444', '#a855f7', '#0ea5e9',
+  '#ec4899', '#22c55e', '#fb923c', '#6366f1', '#14b8a6', '#f43f5e',
+  '#3b82f6', '#84cc16', '#d946ef', '#f97316', '#06b6d4', '#e11d48',
+  '#4f46e5', '#16a34a'
+];
+
+function updateBadge() {
+  document.getElementById('studentCountBadge').textContent = students.length + ' student' + (students.length !== 1 ? 's' : '');
+  updateGroupSizeHint();
+}
+
+// ============ STUDENT MANAGEMENT ============
+function addStudent(name) {
+  name = name || document.getElementById('newStudentName').value.trim();
+  if (!name) return;
+  if (students.find(s => s.name.toLowerCase() === name.toLowerCase())) return;
+  const id = 's' + (++idCounter);
+  students.push({ name, id });
+  preferences[id] = { positive: [], negative: [] };
+  document.getElementById('newStudentName').value = '';
+  renderStudentList();
+  updatePrefDropdowns();
+  updateBadge();
+}
+
+function removeStudent(id) {
+  students = students.filter(s => s.id !== id);
+  delete preferences[id];
+  for (const sid in preferences) {
+    preferences[sid].positive = preferences[sid].positive.filter(x => x !== id);
+    preferences[sid].negative = preferences[sid].negative.filter(x => x !== id);
+  }
+  if (selectedStudentId === id) selectedStudentId = null;
+  renderStudentList(); updatePrefDropdowns(); renderPrefEditor(); updateBadge();
+  if (groups.length) renderGroups();
+}
+
+function clearAll() {
+  students = []; preferences = {}; groups = []; selectedStudentId = null; lockedStudents = new Set();
+  renderStudentList(); updatePrefDropdowns(); renderPrefEditor(); updateBadge();
+  document.getElementById('groupsView').innerHTML = '<div class="empty-state"><h3>No groups yet</h3><p>Add students, set their preferences, then click "Allocate Groups".</p></div>';
+  document.getElementById('insightsView').innerHTML = '<div class="empty-state"><h3>No data yet</h3><p>Allocate groups to see insights.</p></div>';
+  clearNetwork();
+}
+
+// ============ IMPORT ============
+function showImportModal() {
+  document.getElementById('importModal').classList.add('show');
+  document.getElementById('importStatus').innerHTML = '';
+  document.getElementById('filePreview').innerHTML = '';
+  document.getElementById('pastePreview').innerHTML = '';
+}
+function hideImportModal() { document.getElementById('importModal').classList.remove('show'); }
+
+function switchImportTab(tab) {
+  document.querySelectorAll('.import-tab').forEach((t, i) => {
+    const tabs = ['file', 'paste', 'names'];
+    t.classList.toggle('active', tabs[i] === tab);
+  });
+  document.querySelectorAll('.import-panel').forEach(p => p.classList.toggle('active', p.id === 'import-' + tab));
+  document.getElementById('importStatus').innerHTML = '';
+}
+
+function bulkImport() {
+  const text = document.getElementById('bulkNames').value;
+  const names = text.split('\n').map(n => n.trim()).filter(n => n);
+  names.forEach(n => addStudent(n));
+  document.getElementById('bulkNames').value = '';
+  showImportStatus('success', `Imported ${names.length} students.`);
+  hideImportModal();
+}
+
+let parsedSheetData = null;
+let columnMapping = { name: -1, positive: -1, negative: -1 };
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processFile(file);
+  e.target.value = '';
+}
+
+function processFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  const reader = new FileReader();
+  if (ext === 'csv' || ext === 'tsv') {
+    reader.onload = e => parseDelimitedText(e.target.result, ext === 'tsv' ? '\t' : ',', 'filePreview');
+    reader.readAsText(file);
+  } else {
+    reader.onload = e => {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+      if (json.length < 2) { showImportStatus('error', 'File appears empty.'); return; }
+      parsedSheetData = { headers: json[0].map(h => String(h).trim()), rows: json.slice(1).filter(r => r.some(c => String(c).trim())) };
+      renderColumnMapper('filePreview');
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+function parseDelimitedText(text, sep, targetId) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+  if (lines.length < 2) { showImportStatus('error', 'Need at least a header row and one data row.'); return; }
+  function parseLine(line, sep) {
+    const result = []; let current = ''; let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (inQ && line[i+1] === '"') { current += '"'; i++; } else inQ = !inQ; }
+      else if (ch === sep && !inQ) { result.push(current.trim()); current = ''; }
+      else current += ch;
+    }
+    result.push(current.trim()); return result;
+  }
+  parsedSheetData = { headers: parseLine(lines[0], sep), rows: lines.slice(1).map(l => parseLine(l, sep)).filter(r => r.some(c => c)) };
+  renderColumnMapper(targetId);
+}
+
+function parsePastedData() {
+  const text = document.getElementById('pasteData').value.trim();
+  if (!text) return;
+  parseDelimitedText(text, text.includes('\t') ? '\t' : ',', 'pastePreview');
+}
+
+function renderColumnMapper(targetId) {
+  if (!parsedSheetData) return;
+  const { headers } = parsedSheetData;
+  columnMapping = { name: -1, positive: -1, negative: -1 };
+  headers.forEach((h, i) => {
+    const hl = h.toLowerCase();
+    if (columnMapping.name === -1 && (hl.includes('name') || hl.includes('student') || hl === 'full name' || hl === 'respondent')) columnMapping.name = i;
+    if (columnMapping.positive === -1 && (hl.includes('work with') || hl.includes('want to be with') || hl.includes('prefer') || hl.includes('positive') || hl.includes('like') || hl.includes('choose') || hl.includes('for'))) columnMapping.positive = i;
+    if (columnMapping.negative === -1 && (hl.includes('avoid') || hl.includes('not want') || hl.includes("don't want") || hl.includes('negative') || hl.includes('against') || hl.includes('away from'))) columnMapping.negative = i;
+  });
+  if (columnMapping.name === -1) columnMapping.name = 0;
+
+  const optionsHtml = (sel) => '<option value="-1">-- Skip --</option>' + headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${h || 'Column ' + (i+1)}</option>`).join('');
+  const container = document.getElementById(targetId);
+  container.innerHTML = `<div style="margin-top:12px;">
+    <strong style="font-size:0.82rem;color:#9ca0b8;">Map your columns:</strong>
+    <div class="col-mapper">
+      <div><label>Student Name *</label><select onchange="columnMapping.name=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.name)}</select></div>
+      <div><label>Wants to work with</label><select onchange="columnMapping.positive=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.positive)}</select></div>
+      <div><label>Wants to avoid</label><select onchange="columnMapping.negative=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.negative)}</select></div>
+    </div>
+    <div class="help-text">Preferences can contain names separated by commas, semicolons, or "and".</div>
+    <div id="${targetId}-table"></div>
+    <div class="btn-row" style="margin-top:12px;">
+      <button class="btn btn-success" onclick="executeImport('${targetId}')">Import All</button>
+      <button class="btn btn-secondary" onclick="hideImportModal()">Cancel</button>
+    </div>
+  </div>`;
+  updateImportPreview(targetId);
+}
+
+function updateImportPreview(targetId) {
+  if (!parsedSheetData) return;
+  const { rows } = parsedSheetData;
+
+  // Build lookup of all student names in the name column
+  const allNames = [];
+  const nameCounts = {};
+  rows.forEach(row => {
+    const name = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+    if (name) {
+      allNames.push(name);
+      const key = name.toLowerCase();
+      nameCounts[key] = (nameCounts[key] || 0) + 1;
+    }
+  });
+  // Also include already-loaded students
+  students.forEach(s => {
+    const key = s.name.toLowerCase();
+    if (!allNames.some(n => n.toLowerCase() === key)) allNames.push(s.name);
+  });
+  const nameSet = new Set(allNames.map(n => n.toLowerCase()));
+
+  // Validate all rows and collect errors
+  const rowErrors = []; // [{row, errors: [{col, type, detail}]}]
+  let totalErrors = 0;
+  let unmatchedNames = new Set();
+  let duplicateNames = new Set();
+  let emptyRows = 0;
+  let selfRefs = 0;
+
+  rows.forEach((row, ri) => {
+    const name = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+    const errors = [];
+
+    if (!name) {
+      errors.push({ col: 'name', type: 'empty', detail: 'Empty student name' });
+      emptyRows++;
+    } else if (nameCounts[name.toLowerCase()] > 1) {
+      errors.push({ col: 'name', type: 'duplicate', detail: `"${name}" appears ${nameCounts[name.toLowerCase()]} times` });
+      duplicateNames.add(name);
+    }
+
+    ['positive', 'negative'].forEach(type => {
+      const col = columnMapping[type];
+      if (col < 0) return;
+      const raw = String(row[col] || '').trim();
+      if (!raw) return;
+      const prefNames = splitPreferenceNames(raw);
+      prefNames.forEach(pn => {
+        if (!nameSet.has(pn.toLowerCase())) {
+          errors.push({ col: type, type: 'unmatched', detail: pn });
+          unmatchedNames.add(pn);
+          totalErrors++;
+        }
+        if (name && pn.toLowerCase() === name.toLowerCase()) {
+          errors.push({ col: type, type: 'self-ref', detail: `${name} references themselves` });
+          selfRefs++;
+        }
+      });
+    });
+
+    rowErrors.push({ row: ri, errors });
+    totalErrors += errors.filter(e => e.type !== 'unmatched').length;
+  });
+
+  // Build map of first occurrence for each unmatched name
+  const unmatchedFirstOccurrence = {};
+  rowErrors.forEach(re => {
+    re.errors.filter(e => e.type === 'unmatched').forEach(e => {
+      const key = e.detail.toLowerCase();
+      if (!unmatchedFirstOccurrence[key]) {
+        unmatchedFirstOccurrence[key] = { rowIndex: re.row, colType: e.col, name: e.detail };
+      }
+    });
+  });
+
+  // Error summary bar
+  let summaryHtml = '';
+  const hasIssues = unmatchedNames.size > 0 || duplicateNames.size > 0 || emptyRows > 0 || selfRefs > 0;
+  if (hasIssues) {
+    const parts = [];
+    if (unmatchedNames.size > 0) parts.push(`<span style="color:#f87171;">${unmatchedNames.size} unmatched name${unmatchedNames.size > 1 ? 's' : ''}</span>`);
+    if (duplicateNames.size > 0) parts.push(`<span style="color:#fbbf24;">${duplicateNames.size} duplicate${duplicateNames.size > 1 ? 's' : ''}</span>`);
+    if (emptyRows > 0) parts.push(`<span style="color:#fbbf24;">${emptyRows} empty row${emptyRows > 1 ? 's' : ''}</span>`);
+    if (selfRefs > 0) parts.push(`<span style="color:#fbbf24;">${selfRefs} self-reference${selfRefs > 1 ? 's' : ''}</span>`);
+
+    // Build clickable pills for each unique unmatched name
+    let unmatchedPills = '';
+    if (unmatchedNames.size > 0) {
+      const pills = Array.from(unmatchedNames).map(name => {
+        const info = unmatchedFirstOccurrence[name.toLowerCase()];
+        const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        return `<span class="err-clickable" onclick="openFixPopover(event,${info.rowIndex},'${info.colType}','${escaped}','${targetId}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:2px 8px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);cursor:pointer;font-size:0.75rem;" title="Click to fix">${name}</span>`;
+      });
+      unmatchedPills = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${pills.join('')}</div>`;
+    }
+
+    summaryHtml = `<div style="
+      background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.15);
+      border-radius:8px; padding:8px 12px; margin-bottom:8px; font-size:0.78rem;
+    ">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span style="color:#f87171;font-weight:600;">Issues found:</span>
+        ${parts.join('<span style="color:#333;"> &middot; </span>')}
+      </div>
+      ${unmatchedPills}
+    </div>`;
+  } else if (rows.length > 0) {
+    summaryHtml = `<div style="
+      background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.15);
+      border-radius:8px; padding:8px 12px; margin-bottom:8px; font-size:0.78rem;
+      color:#34d399; font-weight:500;
+    ">No issues found &mdash; ${rows.length} students ready to import</div>`;
+  }
+
+  const showRows = rows;
+  let html = summaryHtml;
+  html += '<div class="preview-scroll"><table class="preview-table"><thead><tr>';
+  html += '<th style="width:20px;">&nbsp;</th><th>Student Name</th>';
+  if (columnMapping.positive >= 0) html += '<th style="color:#34d399;">Wants to work with</th>';
+  if (columnMapping.negative >= 0) html += '<th style="color:#f87171;">Wants to avoid</th>';
+  html += '</tr></thead><tbody>';
+
+  showRows.forEach((row, ri) => {
+    const name = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+    const errs = rowErrors[ri]?.errors || [];
+    const hasErr = errs.length > 0;
+    const rowStyle = hasErr ? 'background:rgba(239,68,68,0.04);' : '';
+
+    // Status icon
+    const icon = hasErr
+      ? `<span title="${errs.map(e => e.detail).join(', ')}" style="color:#f87171;cursor:help;font-size:0.9rem;">&#9888;</span>`
+      : `<span style="color:#34d399;font-size:0.75rem;">&#10003;</span>`;
+
+    // Name cell
+    const nameErrs = errs.filter(e => e.col === 'name');
+    let nameHtml = name || '<span style="color:#f87171;font-style:italic;">empty</span>';
+    if (nameErrs.length > 0) {
+      const errColor = nameErrs[0].type === 'duplicate' ? '#fbbf24' : '#f87171';
+      const errLabel = nameErrs[0].type === 'duplicate' ? 'duplicate' : 'empty';
+      nameHtml = `<span style="color:${errColor};border-bottom:1px dashed ${errColor};" title="${nameErrs[0].detail}">${nameHtml}</span> <span style="font-size:0.65rem;color:${errColor};background:rgba(251,191,36,0.1);padding:1px 5px;border-radius:8px;">${errLabel}</span>`;
+    }
+
+    // Preference cells with inline error highlighting
+    function renderPrefCell(type) {
+      const col = columnMapping[type];
+      if (col < 0) return '';
+      const raw = String(row[col] || '').trim();
+      if (!raw) return '<td style="color:#4b5072;">-</td>';
+      const prefNames = splitPreferenceNames(raw);
+      const prefErrs = errs.filter(e => e.col === type);
+      const unmatchedSet = new Set(prefErrs.filter(e => e.type === 'unmatched').map(e => e.detail.toLowerCase()));
+      const selfRefSet = new Set(prefErrs.filter(e => e.type === 'self-ref').map(e => name.toLowerCase()));
+
+      const parts = prefNames.map(pn => {
+        if (unmatchedSet.has(pn.toLowerCase())) {
+          const escaped = pn.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          return `<span class="err-clickable" onclick="openFixPopover(event,${ri},'${type}','${escaped}','${targetId}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:1px 6px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);" title="Click to fix: not found in student list">${pn}</span>`;
+        }
+        if (selfRefSet.has(pn.toLowerCase())) {
+          return `<span style="color:#fbbf24;background:rgba(251,191,36,0.1);padding:1px 6px;border-radius:10px;border:1px solid rgba(251,191,36,0.2);cursor:help;" title="Student references themselves">${pn}</span>`;
+        }
+        const color = type === 'positive' ? '#6ee7b7' : '#fca5a5';
+        return `<span style="color:${color};">${pn}</span>`;
+      });
+      return `<td>${parts.join('<span style="color:#333;">, </span>')}</td>`;
+    }
+
+    html += `<tr style="${rowStyle}">`;
+    html += `<td style="text-align:center;">${icon}</td>`;
+    html += `<td>${nameHtml}</td>`;
+    if (columnMapping.positive >= 0) html += renderPrefCell('positive');
+    if (columnMapping.negative >= 0) html += renderPrefCell('negative');
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  html += `<div class="help-text">${rows.length} row${rows.length !== 1 ? 's' : ''}</div>`;
+  document.getElementById(targetId + '-table').innerHTML = html;
+}
+
+function splitPreferenceNames(text) {
+  if (!text || !text.trim()) return [];
+  return text.replace(/\band\b/gi, ',').split(/[,;\n]+/).map(n => n.trim()).filter(n => n.length > 0);
+}
+
+function executeImport(targetId, forceImport, importMode) {
+  if (!parsedSheetData || columnMapping.name < 0) { showImportStatus('error', 'Please select a column for student names.'); return; }
+
+  // Check for issues and show confirm dialog if not forced
+  if (!forceImport) {
+    const issues = getImportIssues();
+    if (issues.length > 0) {
+      pendingImportTargetId = targetId;
+      const list = document.getElementById('confirmIssueList');
+      list.innerHTML = issues.slice(0, 15).map(i => {
+        const icon = i.type === 'unmatched' ? '<span style="color:#f87171;">&#9888;</span>'
+          : i.type === 'duplicate' ? '<span style="color:#fbbf24;">&#9888;</span>'
+          : '<span style="color:#fbbf24;">&#9888;</span>';
+        return `<li>${icon} ${i.detail}</li>`;
+      }).join('');
+      if (issues.length > 15) list.innerHTML += `<li style="color:#4b5072;font-style:italic;">...and ${issues.length - 15} more</li>`;
+      document.getElementById('confirmImportBtn').onclick = () => {
+        closeConfirmImport();
+        executeImport(targetId, true);
+      };
+      document.getElementById('confirmImportOverlay').classList.add('show');
+      return;
+    }
+  }
+
+  // Ask fresh vs append if students already exist and mode not chosen
+  if (!importMode && students.length > 0) {
+    document.getElementById('existingCountLabel').textContent = students.length;
+    document.getElementById('importFreshBtn').onclick = () => {
+      closeImportMode();
+      executeImport(targetId, true, 'fresh');
+    };
+    document.getElementById('importAppendBtn').onclick = () => {
+      closeImportMode();
+      executeImport(targetId, true, 'append');
+    };
+    document.getElementById('importModeOverlay').classList.add('show');
+    return;
+  }
+
+  // Clear existing data if fresh import
+  if (importMode === 'fresh') {
+    students = [];
+    preferences = {};
+    groups = [];
+    groupNames = [];
+  }
+
+  const { rows } = parsedSheetData;
+  const nameList = [];
+  rows.forEach(row => {
+    const name = String(row[columnMapping.name] || '').trim();
+    if (name) { addStudent(name); nameList.push(name); }
+  });
+  let prefsSet = 0, skipped = 0;
+  rows.forEach(row => {
+    const name = String(row[columnMapping.name] || '').trim();
+    if (!name) return;
+    const student = students.find(s => s.name.toLowerCase() === name.toLowerCase());
+    if (!student) return;
+    [['positive', columnMapping.positive], ['negative', columnMapping.negative]].forEach(([type, col]) => {
+      if (col < 0) return;
+      splitPreferenceNames(String(row[col] || '')).forEach(pn => {
+        const target = students.find(s => s.name.toLowerCase() === pn.toLowerCase());
+        if (target && target.id !== student.id && !preferences[student.id][type].includes(target.id)) {
+          preferences[student.id][type].push(target.id); prefsSet++;
+        } else if (!target && pn) { skipped++; }
+      });
+    });
+  });
+  renderStudentList(); updatePrefDropdowns();
+  const modeLabel = importMode === 'fresh' ? 'Fresh import' : importMode === 'append' ? 'Added' : 'Imported';
+  let msg = `${modeLabel}: ${nameList.length} students with ${prefsSet} preferences.`;
+  if (skipped > 0) msg += ` (${skipped} unmatched preference${skipped > 1 ? 's' : ''} skipped)`;
+  showImportStatus('success', msg);
+  setTimeout(() => hideImportModal(), 1500);
+  parsedSheetData = null;
+}
+
+function closeImportMode() {
+  document.getElementById('importModeOverlay').classList.remove('show');
+}
+
+function showImportStatus(type, msg) {
+  document.getElementById('importStatus').innerHTML = `<div class="import-status ${type}">${msg}</div>`;
+}
+
+// ============ FIX POPOVER ============
+let currentFixTarget = null; // {rowIndex, colType, badName, targetId}
+
+function openFixPopover(event, rowIndex, colType, badName, targetId) {
+  event.stopPropagation();
+  currentFixTarget = { rowIndex, colType, badName, targetId };
+
+  // Collect all names from the sheet for suggestions
+  const allNames = [];
+  if (parsedSheetData) {
+    parsedSheetData.rows.forEach(row => {
+      const n = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+      if (n && !allNames.some(x => x.toLowerCase() === n.toLowerCase())) allNames.push(n);
+    });
+  }
+  students.forEach(s => {
+    if (!allNames.some(x => x.toLowerCase() === s.name.toLowerCase())) allNames.push(s.name);
+  });
+
+  // Find closest matches using simple similarity
+  function similarity(a, b) {
+    a = a.toLowerCase(); b = b.toLowerCase();
+    if (a === b) return 1;
+    let matches = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] === b[i]) matches++;
+    // Also check if one contains the other
+    if (a.includes(b) || b.includes(a)) matches += Math.min(a.length, b.length) * 0.5;
+    return matches / Math.max(a.length, b.length);
+  }
+
+  const suggestions = allNames
+    .map(n => ({ name: n, score: similarity(badName, n) }))
+    .filter(s => s.score > 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+
+  // Position near the clicked element
+  const rect = event.target.getBoundingClientRect();
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  // Keep in viewport
+  if (top + 240 > window.innerHeight) top = rect.top - 240;
+  if (left + 280 > window.innerWidth) left = window.innerWidth - 290;
+
+  let suggestionsHtml = '';
+  if (suggestions.length > 0) {
+    suggestionsHtml = `<div class="fix-label">Did you mean:</div>` +
+      suggestions.map(s => `<div class="fix-suggestion" onclick="applyFix('${s.name.replace(/'/g, "\\'")}')">${s.name}</div>`).join('');
+  }
+
+  const escapedBad = badName.replace(/"/g, '&quot;');
+  document.getElementById('fixPopoverRoot').innerHTML = `
+    <div class="fix-backdrop" onclick="closeFixPopover()"></div>
+    <div class="fix-popover" style="top:${top}px;left:${left}px;">
+      <h4>"${badName}" not found</h4>
+      ${suggestionsHtml}
+      <div class="fix-label" style="margin-top:6px;">Or type the correct name:</div>
+      <input type="text" id="fixNameInput" value="${escapedBad}" onkeydown="if(event.key==='Enter')applyFix(this.value)">
+      <div class="fix-actions">
+        <button class="btn btn-success btn-sm" onclick="applyFix(document.getElementById('fixNameInput').value)">Fix</button>
+        <button class="btn btn-primary btn-sm" onclick="applyFixAddNew()">Add as New Student</button>
+        <button class="btn btn-danger btn-sm" onclick="applyFixRemove()">Remove</button>
+      </div>
+    </div>`;
+
+  setTimeout(() => document.getElementById('fixNameInput')?.focus(), 50);
+}
+
+function closeFixPopover() {
+  document.getElementById('fixPopoverRoot').innerHTML = '';
+  currentFixTarget = null;
+}
+
+function applyFix(newName) {
+  if (!currentFixTarget || !parsedSheetData || !newName.trim()) return;
+  const { badName, targetId } = currentFixTarget;
+  const regex = new RegExp(badName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+
+  // Fix ALL occurrences of the bad name across all rows and preference columns
+  ['positive', 'negative'].forEach(type => {
+    const col = columnMapping[type];
+    if (col < 0) return;
+    parsedSheetData.rows.forEach(row => {
+      const raw = String(row[col] || '');
+      if (regex.test(raw)) {
+        regex.lastIndex = 0;
+        row[col] = raw.replace(regex, newName.trim());
+      }
+    });
+  });
+
+  closeFixPopover();
+  updateImportPreview(targetId);
+}
+
+function applyFixAddNew() {
+  if (!currentFixTarget || !parsedSheetData) return;
+  const { badName, targetId } = currentFixTarget;
+  // Add to parsedSheetData as a new row with just the name
+  const newRow = Array(parsedSheetData.headers.length).fill('');
+  if (columnMapping.name >= 0) newRow[columnMapping.name] = badName;
+  parsedSheetData.rows.push(newRow);
+
+  closeFixPopover();
+  updateImportPreview(targetId);
+}
+
+function applyFixRemove() {
+  if (!currentFixTarget || !parsedSheetData) return;
+  const { badName, targetId } = currentFixTarget;
+
+  // Remove ALL occurrences of the bad name across all rows and preference columns
+  ['positive', 'negative'].forEach(type => {
+    const col = columnMapping[type];
+    if (col < 0) return;
+    parsedSheetData.rows.forEach(row => {
+      const raw = String(row[col] || '');
+      const names = splitPreferenceNames(raw);
+      if (names.some(n => n.toLowerCase() === badName.toLowerCase())) {
+        row[col] = names.filter(n => n.toLowerCase() !== badName.toLowerCase()).join(', ');
+      }
+    });
+  });
+
+  closeFixPopover();
+  updateImportPreview(targetId);
+}
+
+// ============ CONFIRM IMPORT ============
+let pendingImportTargetId = null;
+
+function getImportIssues() {
+  if (!parsedSheetData) return [];
+  const { rows } = parsedSheetData;
+  const allNames = [];
+  rows.forEach(row => {
+    const n = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+    if (n) { const k = n.toLowerCase(); if (!allNames.some(x => x.toLowerCase() === k)) allNames.push(n); }
+  });
+  students.forEach(s => { if (!allNames.some(x => x.toLowerCase() === s.name.toLowerCase())) allNames.push(s.name); });
+  const nameSet = new Set(allNames.map(n => n.toLowerCase()));
+  const nameCounts = {};
+  rows.forEach(row => {
+    const n = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim().toLowerCase() : '';
+    if (n) nameCounts[n] = (nameCounts[n] || 0) + 1;
+  });
+
+  const issues = [];
+  rows.forEach((row, ri) => {
+    const name = columnMapping.name >= 0 ? String(row[columnMapping.name] || '').trim() : '';
+    if (!name) issues.push({ type: 'empty', detail: `Row ${ri + 1}: empty student name` });
+    else if (nameCounts[name.toLowerCase()] > 1) {
+      if (!issues.some(i => i.type === 'duplicate' && i.name === name.toLowerCase()))
+        issues.push({ type: 'duplicate', detail: `"${name}" appears ${nameCounts[name.toLowerCase()]} times`, name: name.toLowerCase() });
+    }
+    ['positive', 'negative'].forEach(type => {
+      const col = columnMapping[type];
+      if (col < 0) return;
+      splitPreferenceNames(String(row[col] || '')).forEach(pn => {
+        if (!nameSet.has(pn.toLowerCase()))
+          issues.push({ type: 'unmatched', detail: `"${pn}" (in ${name}'s ${type === 'positive' ? 'work with' : 'avoid'} list) not found — will be skipped` });
+        if (name && pn.toLowerCase() === name.toLowerCase())
+          issues.push({ type: 'self-ref', detail: `${name} references themselves — will be ignored` });
+      });
+    });
+  });
+  return issues;
+}
+
+function closeConfirmImport() {
+  document.getElementById('confirmImportOverlay').classList.remove('show');
+  pendingImportTargetId = null;
+}
+
+// ============ STUDENT LIST & PREF EDITOR ============
+function getLastName(name) {
+  const parts = name.trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+}
+
+function sortStudents() {
+  const mode = document.getElementById('studentSort')?.value || 'added';
+  if (mode === 'added') { renderStudentList(); return; }
+  const sorted = [...students];
+  sorted.sort((a, b) => {
+    let aKey, bKey;
+    if (mode.startsWith('first')) { aKey = a.name.toLowerCase(); bKey = b.name.toLowerCase(); }
+    else { aKey = getLastName(a.name).toLowerCase(); bKey = getLastName(b.name).toLowerCase(); }
+    const cmp = aKey.localeCompare(bKey);
+    return mode.endsWith('desc') ? -cmp : cmp;
+  });
+  students = sorted;
+  renderStudentList();
+}
+
+function renderStudentList() {
+  const ul = document.getElementById('studentList');
+  ul.innerHTML = students.map(s => {
+    const pos = preferences[s.id]?.positive.length || 0;
+    const neg = preferences[s.id]?.negative.length || 0;
+    const prefText = (pos || neg) ? `<span class="pref-count">${pos > 0 ? '+' + pos : ''}${neg > 0 ? ' -' + neg : ''}</span>` : '';
+    return `<li><span class="name">${s.name}</span>${prefText}<button class="remove-btn" onclick="removeStudent('${s.id}')">&times;</button></li>`;
+  }).join('');
+}
+
+function updatePrefDropdowns() {
+  const sel = document.getElementById('prefStudent');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">-- Choose student --</option>' +
+    students.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  if (students.find(s => s.id === current)) sel.value = current;
+}
+
+function renderPrefEditor() {
+  const area = document.getElementById('prefEditorArea');
+  const sid = document.getElementById('prefStudent').value;
+  if (!sid) { area.innerHTML = ''; return; }
+  const pref = preferences[sid];
+  const others = students.filter(s => s.id !== sid);
+  const getName = id => students.find(s => s.id === id)?.name || '';
+  let html = '<div class="pref-editor">';
+  html += '<div style="margin-bottom:10px;"><strong style="color:#34d399;font-size:0.78rem;font-weight:600;">WANTS TO WORK WITH</strong>';
+  pref.positive.forEach((pid, i) => {
+    html += `<div class="pref-row"><span class="pref-badge-pos">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${sid}','positive',${i})">Remove</button></div>`;
+  });
+  const posOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
+  html += `<div class="pref-row"><select id="addPosSelect"><option value="">+ Add...</option>${posOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join('')}</select><button class="btn btn-success btn-sm" onclick="addPref('${sid}','positive')">Add</button></div></div>`;
+  html += '<div><strong style="color:#f87171;font-size:0.78rem;font-weight:600;">WANTS TO AVOID</strong>';
+  pref.negative.forEach((pid, i) => {
+    html += `<div class="pref-row"><span class="pref-badge-neg">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${sid}','negative',${i})">Remove</button></div>`;
+  });
+  const negOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
+  html += `<div class="pref-row"><select id="addNegSelect"><option value="">+ Add...</option>${negOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join('')}</select><button class="btn btn-danger btn-sm" onclick="addPref('${sid}','negative')">Add</button></div></div>`;
+  html += '</div>';
+  area.innerHTML = html;
+}
+
+function addPref(sid, type) {
+  const val = document.getElementById(type === 'positive' ? 'addPosSelect' : 'addNegSelect').value;
+  if (!val) return;
+  preferences[sid][type].push(val);
+  renderPrefEditor(); renderStudentList();
+}
+function removePref(sid, type, index) {
+  preferences[sid][type].splice(index, 1);
+  renderPrefEditor(); renderStudentList();
+}
+
+// ============ GROUP SETTINGS ============
+let groupMode = 'numGroups'; // 'numGroups' or 'groupSize'
+
+function setGroupMode(mode) {
+  groupMode = mode;
+  document.getElementById('toggleNumGroups').classList.toggle('active', mode === 'numGroups');
+  document.getElementById('toggleGroupSize').classList.toggle('active', mode === 'groupSize');
+  document.getElementById('groupModeNumGroups').style.display = mode === 'numGroups' ? '' : 'none';
+  document.getElementById('groupModeGroupSize').style.display = mode === 'groupSize' ? '' : 'none';
+  updateGroupSizeHint();
+}
+
+function updateGroupSizeHint() {
+  const hint = document.getElementById('groupSizeHint');
+  if (!hint || groupMode !== 'groupSize') return;
+  if (students.length === 0) { hint.textContent = ''; return; }
+  const n = students.length;
+  const numG = calcNumGroups();
+  const sizes = Array.from({ length: numG }, (_, i) => {
+    const base = Math.floor(n / numG);
+    return i < (n % numG) ? base + 1 : base;
+  });
+  const minActual = Math.min(...sizes);
+  const maxActual = Math.max(...sizes);
+  const sizeStr = minActual === maxActual ? `${minActual}` : `${minActual}-${maxActual}`;
+  hint.textContent = `${n} students → ${numG} groups of ${sizeStr}`;
+}
+
+function calcNumGroups() {
+  if (groupMode === 'numGroups') {
+    return Math.min(parseInt(document.getElementById('numGroups').value) || 4, students.length);
+  }
+  // Group size mode: figure out optimal number of groups within the size range
+  const minSize = Math.max(2, parseInt(document.getElementById('groupSizeMin').value) || 4);
+  const maxSize = Math.max(minSize, parseInt(document.getElementById('groupSizeMax').value) || 6);
+  const n = students.length;
+  // Valid number of groups: where all groups can be within [minSize, maxSize]
+  // numGroups * minSize <= n  AND  numGroups * maxSize >= n
+  const lo = Math.max(1, Math.ceil(n / maxSize));
+  const hi = Math.min(n, Math.floor(n / minSize));
+  if (lo > hi) {
+    // No perfect fit — pick the closest
+    return Math.max(1, Math.round(n / ((minSize + maxSize) / 2)));
+  }
+  // Return the middle option (tends to give balanced groups)
+  return Math.round((lo + hi) / 2);
+}
+
+// ============ GROUP ALLOCATION ============
+function allocateGroups() {
+  if (students.length < 2) return;
+  const sizeConstraints = groupMode === 'groupSize' ? {
+    min: Math.max(2, parseInt(document.getElementById('groupSizeMin').value) || 4),
+    max: Math.max(2, parseInt(document.getElementById('groupSizeMax').value) || 6)
+  } : null;
+
+  // Collect locked students — from locked groups AND individually locked
+  const pinnedStudentIds = new Set(lockedStudents);
+  const preservedGroups = []; // {index, members}
+  if (groups.length > 0) {
+    groups.forEach((g, gi) => {
+      if (lockedGroups[gi]) {
+        preservedGroups.push({ index: gi, members: [...g] });
+        g.forEach(id => pinnedStudentIds.add(id));
+      }
+    });
+  }
+
+  // Individually locked students not in locked groups stay in their current group
+  const individuallyPinnedPlacements = []; // {sid, groupIndex}
+  if (groups.length > 0) {
+    groups.forEach((g, gi) => {
+      if (!lockedGroups[gi]) {
+        g.forEach(sid => {
+          if (lockedStudents.has(sid)) {
+            individuallyPinnedPlacements.push({ sid, groupIndex: gi });
+            pinnedStudentIds.add(sid);
+          }
+        });
+      }
+    });
+  }
+
+  // Students to allocate are those not pinned
+  const freeStudents = students.filter(s => !pinnedStudentIds.has(s.id));
+
+  function pairScore(a, b) {
+    let s = 0;
+    if (preferences[a]?.positive.includes(b)) s += 2;
+    if (preferences[b]?.positive.includes(a)) s += 2;
+    if (preferences[a]?.negative.includes(b)) s -= 3;
+    if (preferences[b]?.negative.includes(a)) s -= 3;
+    return s;
+  }
+  function groupScore(g) {
+    let t = 0;
+    for (let i = 0; i < g.length; i++) for (let j = i+1; j < g.length; j++) t += pairScore(g[i], g[j]);
+    return t;
+  }
+  function totalScore(gs) { return gs.reduce((s, g) => s + groupScore(g), 0); }
+
+  function sizePenalty(gs) {
+    if (!sizeConstraints) return 0;
+    let pen = 0;
+    gs.forEach(g => {
+      if (g.length < sizeConstraints.min) pen -= (sizeConstraints.min - g.length) * 10;
+      if (g.length > sizeConstraints.max) pen -= (g.length - sizeConstraints.max) * 10;
+    });
+    return pen;
+  }
+  function fullScore(gs) { return totalScore(gs) + sizePenalty(gs); }
+
+  if (freeStudents.length === 0 && groups.length > 0) {
+    renderGroups(); renderInsights(); renderNetwork(); switchTab('groups');
+    return;
+  }
+
+  // Determine which group counts to try
+  let groupCountsToTry;
+  if (sizeConstraints) {
+    const n = freeStudents.length;
+    const lo = Math.max(1, Math.ceil(n / sizeConstraints.max));
+    const hi = Math.max(lo, Math.floor(n / sizeConstraints.min));
+    groupCountsToTry = [];
+    for (let gc = lo; gc <= hi; gc++) groupCountsToTry.push(gc + preservedGroups.length);
+    if (groupCountsToTry.length === 0) groupCountsToTry = [calcNumGroups()];
+  } else {
+    groupCountsToTry = [calcNumGroups()];
+  }
+
+  let bestFreeGroups = null, bestScore = -Infinity, bestNumGroups = groupCountsToTry[0];
+  const attemptsPerCount = Math.max(10, Math.floor(50 / groupCountsToTry.length));
+
+  for (const numG of groupCountsToTry) {
+    const freeGroupCount = numG - preservedGroups.length;
+    if (freeGroupCount < 1 && freeStudents.length > 0) continue;
+
+    for (let attempt = 0; attempt < attemptsPerCount; attempt++) {
+      const shuffled = [...freeStudents].sort(() => Math.random() - 0.5);
+      let gs = Array.from({ length: freeGroupCount }, () => []);
+
+      // Pre-place individually pinned students into their target free-group slots
+      const pinnedPlaced = new Set();
+      individuallyPinnedPlacements.forEach(({ sid, groupIndex }) => {
+        // Map the old group index to the free group slot if possible
+        let freeSlot = groupIndex - preservedGroups.filter(pg => pg.index < groupIndex).length;
+        if (freeSlot >= 0 && freeSlot < freeGroupCount) {
+          gs[freeSlot].push(sid);
+          pinnedPlaced.add(sid);
+        }
+      });
+
+      // Distribute remaining free students
+      const remaining = shuffled.filter(s => !pinnedPlaced.has(s.id));
+      remaining.forEach((s, i) => gs[i % freeGroupCount].push(s.id));
+
+      let improved = true, iters = 0;
+      while (improved && iters < 200) {
+        improved = false; iters++;
+        for (let gi = 0; gi < gs.length; gi++)
+          for (let gj = gi+1; gj < gs.length; gj++)
+            for (let si = 0; si < gs[gi].length; si++)
+              for (let sj = 0; sj < gs[gj].length; sj++) {
+                // Don't swap pinned students
+                if (pinnedStudentIds.has(gs[gi][si]) || pinnedStudentIds.has(gs[gj][sj])) continue;
+                const before = groupScore(gs[gi]) + groupScore(gs[gj]) + sizePenalty(gs);
+                [gs[gi][si], gs[gj][sj]] = [gs[gj][sj], gs[gi][si]];
+                const after = groupScore(gs[gi]) + groupScore(gs[gj]) + sizePenalty(gs);
+                if (after > before) improved = true;
+                else [gs[gi][si], gs[gj][sj]] = [gs[gj][sj], gs[gi][si]];
+              }
+      }
+      const s = fullScore(gs);
+      if (s > bestScore) { bestScore = s; bestFreeGroups = gs.map(g => [...g]); bestNumGroups = numG; }
+    }
+  }
+
+  if (!bestFreeGroups) {
+    alert('Could not allocate groups. Check your settings.');
+    return;
+  }
+
+  // Rebuild groups
+  const newGroups = Array(bestNumGroups).fill(null);
+  const newGroupNames = Array(bestNumGroups).fill('');
+  const newLockedGroups = Array(bestNumGroups).fill(false);
+
+  preservedGroups.forEach(pg => {
+    const idx = pg.index < bestNumGroups ? pg.index : null;
+    if (idx !== null) {
+      newGroups[idx] = pg.members;
+      newGroupNames[idx] = groupNames[pg.index] || '';
+      newLockedGroups[idx] = true;
+    }
+  });
+
+  let freeIdx = 0;
+  for (let i = 0; i < bestNumGroups; i++) {
+    if (!newGroups[i] && freeIdx < bestFreeGroups.length) {
+      newGroups[i] = bestFreeGroups[freeIdx++];
+      newGroupNames[i] = groupNames[i] || '';
+    }
+  }
+
+  groups = newGroups.filter(g => g && g.length > 0);
+  groupNames = newGroupNames.filter((_, i) => newGroups[i] && newGroups[i].length > 0);
+  lockedGroups = newLockedGroups.filter((_, i) => newGroups[i] && newGroups[i].length > 0);
+  selectedStudentId = null;
+  renderGroups(); renderInsights(); renderNetwork(); switchTab('groups');
+}
+
+// ============ GROUP RENDERING ============
+function getRelatedStudents(sid) {
+  if (!sid) return { positive: new Set(), negative: new Set(), positiveIncoming: new Set(), negativeIncoming: new Set() };
+  const pos = new Set(preferences[sid]?.positive || []);
+  const neg = new Set(preferences[sid]?.negative || []);
+  const posIn = new Set();
+  const negIn = new Set();
+  // Also include students who have preferences toward this student
+  students.forEach(s => {
+    if (preferences[s.id]?.positive?.includes(sid)) { posIn.add(s.id); pos.add(s.id); }
+    if (preferences[s.id]?.negative?.includes(sid)) { negIn.add(s.id); neg.add(s.id); }
+  });
+  return { positive: pos, negative: neg, positiveIncoming: posIn, negativeIncoming: negIn };
+}
+
+function renderGroups() {
+  const container = document.getElementById('groupsView');
+  if (!groups.length) return;
+  const getName = id => students.find(s => s.id === id)?.name || id;
+  const activeId = draggedStudentId || selectedStudentId;
+  const related = getRelatedStudents(activeId);
+
+  let html = '<div class="groups-controls">';
+  html += `<button class="btn btn-primary btn-sm" onclick="allocateGroups()">Re-allocate</button>`;
+  html += `<button class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export Spreadsheet</button>`;
+  html += `<button class="btn btn-secondary btn-sm" onclick="saveLayout()">Save Layout</button>`;
+  html += `<button class="btn btn-secondary btn-sm" onclick="showLoadLayoutMenu(event)">Load Layout</button>`;
+  html += `<span class="hint">Click a student to see preferences &middot; Drag to move between groups</span>`;
+  html += '</div>';
+  // Colour legend
+  html += `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:10px;border:1px solid rgba(255,255,255,0.04);font-size:0.72rem;align-items:center;">
+    <span style="color:#454868;font-weight:600;margin-right:4px;">Legend:</span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #818cf8;background:rgba(99,102,241,0.12);"></span><span style="color:#8b8fb0;">Selected</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #10b981;background:rgba(16,185,129,0.2);"></span><span style="color:#8b8fb0;">I chose them</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px dotted #10b981;background:rgba(16,185,129,0.1);"></span><span style="color:#8b8fb0;">They chose me</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid #ef4444;background:rgba(239,68,68,0.2);"></span><span style="color:#8b8fb0;">I avoid them</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:50%;border:2px dotted #ef4444;background:rgba(239,68,68,0.1);"></span><span style="color:#8b8fb0;">They avoid me</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="display:inline-block;width:14px;height:14px;border-radius:4px;border:3px double rgba(255,255,255,0.2);background:rgba(255,255,255,0.04);"></span><span style="color:#8b8fb0;">Locked group</span></span>
+    <span style="display:inline-flex;align-items:center;gap:4px;"><span style="font-size:0.7rem;">&#128204;</span><span style="color:#8b8fb0;">Pinned student</span></span>
+  </div>`;
+  html += '<div class="groups-container">';
+
+  groups.forEach((g, gi) => {
+    const ci = gi % GROUP_COLORS.length;
+    const score = calcGroupSatisfaction(g);
+    const isLocked = lockedGroups[gi] || false;
+    const displayName = groupNames[gi] || `Group ${gi+1}`;
+    const lockIcon = isLocked ? '&#128274;' : '&#128275;';
+    const lockTitle = isLocked ? 'Locked — will not change on re-allocate' : 'Unlocked — click to lock';
+    const lockedStyle = isLocked ? 'opacity:0.9;border-style:double;border-width:3px;' : '';
+    html += `<div class="group-card" data-gi="${gi}"
+      style="background:${GROUP_COLORS[ci]};border-color:${GROUP_BORDERS[ci]};${lockedStyle}"
+      ondragover="event.preventDefault();this.classList.add('drag-over')"
+      ondragleave="this.classList.remove('drag-over')"
+      ondrop="dropStudent(event,${gi});this.classList.remove('drag-over')">
+      <h3 style="color:${GROUP_TEXT_COLORS[ci]};display:flex;align-items:center;gap:6px;">
+        <span class="group-name-editable" contenteditable="true" spellcheck="false"
+          style="outline:none;border-bottom:1px dashed rgba(255,255,255,0.15);padding:0 2px;min-width:40px;"
+          onblur="renameGroup(${gi}, this.textContent)"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${displayName}</span>
+        <span class="group-count">${g.length}</span>
+        <span class="group-score">${score}%</span>
+        <span style="margin-left:auto;cursor:pointer;font-size:0.75rem;opacity:0.7;" title="${lockTitle}" onclick="event.stopPropagation();toggleLockGroup(${gi})">${lockIcon}</span>
+      </h3>`;
+
+    g.forEach((sid, si) => {
+      let cls = 'student-chip';
+      if (activeId === sid) cls += ' selected';
+      if (draggedStudentId === sid) cls += ' drag-source';
+      const isPinned = lockedStudents.has(sid);
+      if (activeId && activeId !== sid) {
+        if (draggedStudentId) {
+          const isOutPos = (preferences[activeId]?.positive || []).includes(sid);
+          const isInPos = related.positiveIncoming.has(sid) && !isOutPos;
+          const isOutNeg = (preferences[activeId]?.negative || []).includes(sid);
+          const isInNeg = related.negativeIncoming.has(sid) && !isOutNeg;
+          if (isOutPos) cls += ' drag-pref-positive';
+          else if (isInPos) cls += ' drag-pref-positive-in';
+          if (isOutNeg) cls += ' drag-pref-negative';
+          else if (isInNeg) cls += ' drag-pref-negative-in';
+        } else {
+          const isOutPos = (preferences[activeId]?.positive || []).includes(sid);
+          const isInPos = related.positiveIncoming.has(sid) && !isOutPos;
+          const isOutNeg = (preferences[activeId]?.negative || []).includes(sid);
+          const isInNeg = related.negativeIncoming.has(sid) && !isOutNeg;
+          if (isOutPos) cls += ' pref-positive';
+          else if (isInPos) cls += ' pref-positive-in';
+          if (isOutNeg) cls += ' pref-negative';
+          else if (isInNeg) cls += ' pref-negative-in';
+        }
+      }
+      const pinIcon = isPinned ? `<span style="font-size:0.6rem;margin-left:3px;cursor:pointer;opacity:0.8;" title="Pinned — click to unpin" onclick="event.stopPropagation();togglePinStudent('${sid}')">&#128204;</span>` : '';
+      html += `<span class="${cls}" draggable="true" data-sid="${sid}" data-gi="${gi}" data-si="${si}"
+        ondragstart="dragStart(event,'${sid}')"
+        ondragend="dragEnd(event)"
+        ondragover="event.preventDefault();chipDragOver(event,${gi},${si})"
+        ondrop="chipDrop(event,${gi},${si})"
+        onclick="selectStudent('${sid}')"
+        oncontextmenu="event.preventDefault();togglePinStudent('${sid}')"
+        style="color:${GROUP_TEXT_COLORS[ci]};">
+        <span class="chip-dot" style="background:${GROUP_DOT_COLORS[ci]};"></span>
+        ${getName(sid)}${pinIcon}
+      </span>`;
+    });
+    html += '</div>';
+  });
+
+  // "New Group" drop zone
+  html += `<div class="group-card" style="background:rgba(255,255,255,0.015);border:2px dashed rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;min-height:80px;cursor:default;transition:all 0.2s;"
+    ondragover="event.preventDefault();this.style.borderColor='rgba(99,102,241,0.5)';this.style.background='rgba(99,102,241,0.06)';"
+    ondragleave="this.style.borderColor='rgba(255,255,255,0.08)';this.style.background='rgba(255,255,255,0.015)';"
+    ondrop="dropToNewGroup(event);this.style.borderColor='rgba(255,255,255,0.08)';this.style.background='rgba(255,255,255,0.015)';">
+    <span style="color:#454868;font-size:0.82rem;font-weight:500;">+ Drop here to create new group</span>
+  </div>`;
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function calcGroupSatisfaction(g) {
+  let total = 0, satisfied = 0;
+  g.forEach(sid => {
+    const pos = preferences[sid]?.positive || [];
+    const neg = preferences[sid]?.negative || [];
+    total += pos.length + neg.length;
+    pos.forEach(p => { if (g.includes(p)) satisfied++; });
+    neg.forEach(n => { if (!g.includes(n)) satisfied++; });
+  });
+  return total ? Math.round((satisfied / total) * 100) : 100;
+}
+
+// ============ DRAG & DROP ============
+function dragStart(e, sid) {
+  draggedStudentId = sid;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', sid);
+  setTimeout(() => renderGroups(), 0);
+}
+function dragEnd(e) {
+  draggedStudentId = null;
+  renderGroups();
+}
+
+function dropStudent(e, targetGroupIndex) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!draggedStudentId) return;
+  const sourceGroupIndex = groups.findIndex(g => g.includes(draggedStudentId));
+  if (sourceGroupIndex === targetGroupIndex) { draggedStudentId = null; renderGroups(); return; }
+  groups[sourceGroupIndex] = groups[sourceGroupIndex].filter(id => id !== draggedStudentId);
+  groups[targetGroupIndex].push(draggedStudentId);
+  cleanupEmptyGroups();
+  draggedStudentId = null;
+  renderGroups(); renderInsights();
+}
+
+// Reorder within a group by dragging over another chip
+function chipDragOver(e, gi, si) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+function chipDrop(e, targetGi, targetSi) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!draggedStudentId) return;
+  const sourceGi = groups.findIndex(g => g.includes(draggedStudentId));
+  const sourceSi = groups[sourceGi]?.indexOf(draggedStudentId);
+  if (sourceSi === undefined || sourceSi < 0) return;
+
+  // Remove from source
+  groups[sourceGi].splice(sourceSi, 1);
+
+  // Insert at target position
+  if (sourceGi === targetGi) {
+    // Same group — adjust index if needed
+    const insertAt = sourceSi < targetSi ? targetSi : targetSi;
+    groups[targetGi].splice(insertAt, 0, draggedStudentId);
+  } else {
+    groups[targetGi].splice(targetSi, 0, draggedStudentId);
+  }
+
+  cleanupEmptyGroups();
+  draggedStudentId = null;
+  renderGroups(); renderInsights();
+}
+
+function dropToNewGroup(e) {
+  e.preventDefault();
+  if (!draggedStudentId) return;
+  const sourceGroupIndex = groups.findIndex(g => g.includes(draggedStudentId));
+  if (sourceGroupIndex < 0) return;
+  groups[sourceGroupIndex] = groups[sourceGroupIndex].filter(id => id !== draggedStudentId);
+  groups.push([draggedStudentId]);
+  groupNames.push('');
+  lockedGroups.push(false);
+  cleanupEmptyGroups();
+  draggedStudentId = null;
+  renderGroups(); renderInsights();
+}
+
+function cleanupEmptyGroups() {
+  const keep = groups.map(g => g.length > 0);
+  groups = groups.filter((_, i) => keep[i]);
+  groupNames = groupNames.filter((_, i) => keep[i]);
+  lockedGroups = lockedGroups.filter((_, i) => keep[i]);
+}
+
+function selectStudent(sid) {
+  selectedStudentId = selectedStudentId === sid ? null : sid;
+  renderGroups();
+}
+
+function togglePinStudent(sid) {
+  if (lockedStudents.has(sid)) lockedStudents.delete(sid);
+  else lockedStudents.add(sid);
+  renderGroups();
+}
+
+function renameGroup(gi, newName) {
+  groupNames[gi] = newName.trim() || `Group ${gi+1}`;
+}
+
+function toggleLockGroup(gi) {
+  lockedGroups[gi] = !lockedGroups[gi];
+  renderGroups();
+}
+
+// ============ EXPORT ============
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return { r, g, b };
+}
+
+function exportToExcel() {
+  if (!groups.length) return;
+  const getName = id => students.find(s => s.id === id)?.name || id;
+  const wb = XLSX.utils.book_new();
+
+  // --- Sheet 1: Groups Overview (colour-coded) ---
+  const maxLen = Math.max(...groups.map(g => g.length));
+  const headerRow = groups.map((_, i) => groupNames[i] || `Group ${i + 1}`);
+  const aoa = [headerRow];
+  for (let r = 0; r < maxLen; r++) {
+    aoa.push(groups.map(g => g[r] ? getName(g[r]) : ''));
+  }
+  // Add a blank row then satisfaction
+  aoa.push(groups.map(() => ''));
+  aoa.push(groups.map(g => calcGroupSatisfaction(g) + '% satisfied'));
+
+  const ws1 = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Apply column widths
+  ws1['!cols'] = groups.map(() => ({ wch: 20 }));
+
+  // Apply cell colours
+  for (let c = 0; c < groups.length; c++) {
+    const ci = c % GROUP_DOT_COLORS.length;
+    const rgb = hexToRgb(GROUP_DOT_COLORS[ci]);
+    // Lighter tint for cell fills: mix with white at 25% intensity
+    const tint = { r: Math.round(rgb.r + (255 - rgb.r) * 0.75), g: Math.round(rgb.g + (255 - rgb.g) * 0.75), b: Math.round(rgb.b + (255 - rgb.b) * 0.75) };
+    const fill = { patternType: 'solid', fgColor: { rgb: ((1 << 24) + (tint.r << 16) + (tint.g << 8) + tint.b).toString(16).slice(1).toUpperCase() } };
+    const headerFill = { patternType: 'solid', fgColor: { rgb: ((1 << 24) + (rgb.r << 16) + (rgb.g << 8) + rgb.b).toString(16).slice(1).toUpperCase() } };
+
+    for (let r = 0; r <= maxLen + 1; r++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws1[addr]) ws1[addr] = { v: '', t: 's' };
+      if (r === 0) {
+        ws1[addr].s = { fill: headerFill, font: { bold: true, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center' } };
+      } else if (r <= maxLen && aoa[r][c]) {
+        ws1[addr].s = { fill, alignment: { horizontal: 'center' } };
+      } else if (r === maxLen + 2) {
+        ws1[addr].s = { fill, font: { italic: true, color: { rgb: '666666' } }, alignment: { horizontal: 'center' } };
+      }
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws1, 'Groups');
+
+  // --- Sheet 2: Student Details ---
+  const detailRows = [['Student', 'Group', 'Wants to Work With', 'Wants to Avoid', 'Satisfaction']];
+  students.forEach(s => {
+    const gi = groups.findIndex(g => g.includes(s.id));
+    const pos = (preferences[s.id]?.positive || []).map(getName).join(', ');
+    const neg = (preferences[s.id]?.negative || []).map(getName).join(', ');
+    const myGroup = groups[gi] || [];
+    const prefs = preferences[s.id];
+    let sat = 0, tot = (prefs?.positive.length || 0) + (prefs?.negative.length || 0);
+    (prefs?.positive || []).forEach(p => { if (myGroup.includes(p)) sat++; });
+    (prefs?.negative || []).forEach(n => { if (!myGroup.includes(n)) sat++; });
+    const pct = tot > 0 ? Math.round((sat / tot) * 100) + '%' : 'N/A';
+    detailRows.push([s.name, gi >= 0 ? (groupNames[gi] || 'Group ' + (gi + 1)) : 'Unassigned', pos || '-', neg || '-', pct]);
+  });
+
+  const ws2 = XLSX.utils.aoa_to_sheet(detailRows);
+  ws2['!cols'] = [{ wch: 18 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 14 }];
+
+  // Colour the Group column cells by group colour
+  for (let r = 1; r < detailRows.length; r++) {
+    const studentName = detailRows[r][0];
+    const student = students.find(s => s.name === studentName);
+    if (!student) continue;
+    const gi = groups.findIndex(g => g.includes(student.id));
+    if (gi < 0) continue;
+    const ci = gi % GROUP_DOT_COLORS.length;
+    const rgb = hexToRgb(GROUP_DOT_COLORS[ci]);
+    const tint = { r: Math.round(rgb.r + (255 - rgb.r) * 0.75), g: Math.round(rgb.g + (255 - rgb.g) * 0.75), b: Math.round(rgb.b + (255 - rgb.b) * 0.75) };
+    const fill = { patternType: 'solid', fgColor: { rgb: ((1 << 24) + (tint.r << 16) + (tint.g << 8) + tint.b).toString(16).slice(1).toUpperCase() } };
+    // Apply fill to entire row
+    for (let c = 0; c < 5; c++) {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws2[addr]) ws2[addr] = { v: '', t: 's' };
+      ws2[addr].s = { fill };
+    }
+  }
+  // Header row styling
+  for (let c = 0; c < 5; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    ws2[addr].s = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: 'E8E8F0' } }, alignment: { horizontal: 'center' } };
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws2, 'Student Details');
+
+  // --- Sheet 3: Conflicts & Insights ---
+  const insightRows = [['Insight', 'Details']];
+
+  // Overall stats
+  let totalPrefs = 0, satisfiedPrefs = 0;
+  students.forEach(s => {
+    const pos = preferences[s.id]?.positive || [];
+    const neg = preferences[s.id]?.negative || [];
+    const myGroup = groups.find(g => g.includes(s.id)) || [];
+    pos.forEach(p => { totalPrefs++; if (myGroup.includes(p)) satisfiedPrefs++; });
+    neg.forEach(n => { totalPrefs++; if (!myGroup.includes(n)) satisfiedPrefs++; });
+  });
+  insightRows.push(['Overall Satisfaction', totalPrefs > 0 ? Math.round((satisfiedPrefs / totalPrefs) * 100) + '%' : 'N/A']);
+
+  // Conflicts
+  const conflicts = [];
+  groups.forEach((g, gi) => g.forEach(sid => {
+    (preferences[sid]?.negative || []).forEach(nid => {
+      if (g.includes(nid) && !conflicts.find(c => c.a === nid && c.b === sid))
+        conflicts.push({ a: sid, b: nid, group: gi });
+    });
+  }));
+  if (conflicts.length) {
+    conflicts.forEach(c => insightRows.push(['Conflict', `${getName(c.a)} & ${getName(c.b)} both in Group ${c.group + 1}`]));
+  } else {
+    insightRows.push(['Conflicts', 'None']);
+  }
+
+  // Mutual positives
+  students.forEach(s => {
+    (preferences[s.id]?.positive || []).forEach(t => {
+      if (preferences[t]?.positive?.includes(s.id) && s.id < t) {
+        const together = groups.some(g => g.includes(s.id) && g.includes(t));
+        insightRows.push(['Mutual Positive', `${s.name} & ${getName(t)} - ${together ? 'together' : 'separated'}`]);
+      }
+    });
+  });
+
+  // Isolated students
+  const isolated = students.filter(s => {
+    const given = (preferences[s.id]?.positive.length || 0) + (preferences[s.id]?.negative.length || 0);
+    const received = students.filter(o => preferences[o.id]?.positive.includes(s.id) || preferences[o.id]?.negative.includes(s.id)).length;
+    return given === 0 && received === 0;
+  });
+  if (isolated.length) insightRows.push(['Isolated Students', isolated.map(s => s.name).join(', ')]);
+
+  const ws3 = XLSX.utils.aoa_to_sheet(insightRows);
+  ws3['!cols'] = [{ wch: 20 }, { wch: 50 }];
+  // Header
+  for (let c = 0; c < 2; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    ws3[addr].s = { font: { bold: true }, fill: { patternType: 'solid', fgColor: { rgb: 'E8E8F0' } } };
+  }
+  // Colour conflict rows red
+  for (let r = 1; r < insightRows.length; r++) {
+    if (insightRows[r][0] === 'Conflict') {
+      for (let c = 0; c < 2; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c });
+        if (ws3[addr]) ws3[addr].s = { fill: { patternType: 'solid', fgColor: { rgb: 'FDDEDE' } }, font: { color: { rgb: 'C62828' } } };
+      }
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, ws3, 'Insights');
+
+  XLSX.writeFile(wb, 'group_allocations.xlsx', { cellStyles: true });
+}
+
+// ============ NETWORK ============
+let simulation = null;
+function clearNetwork() { d3.select('#network-svg').selectAll('*').remove(); if (simulation) simulation.stop(); }
+
+function renderNetwork() {
+  clearNetwork();
+  if (students.length < 2) return;
+  const svg = d3.select('#network-svg');
+  const container = document.getElementById('network-container');
+  const width = container.clientWidth;
+  const height = container.clientHeight || 500;
+  svg.attr('viewBox', `0 0 ${width} ${height}`);
+
+  // Zoom container — all content goes inside this <g>
+  const zoomG = svg.append('g');
+  svg.call(d3.zoom()
+    .scaleExtent([0.2, 5])
+    .on('zoom', (e) => zoomG.attr('transform', e.transform))
+  );
+
+  const nodes = students.map(s => {
+    const gi = groups.findIndex(g => g.includes(s.id));
+    return { id: s.id, name: s.name, group: gi };
+  });
+  const links = [], linkSet = new Set();
+  students.forEach(s => {
+    (preferences[s.id]?.positive || []).forEach(t => {
+      const key = [s.id, t].sort().join('-');
+      if (!linkSet.has(key + 'pos')) { links.push({ source: s.id, target: t, type: 'positive', mutual: preferences[t]?.positive?.includes(s.id) }); linkSet.add(key + 'pos'); }
+    });
+    (preferences[s.id]?.negative || []).forEach(t => {
+      const key = [s.id, t].sort().join('-');
+      if (!linkSet.has(key + 'neg')) { links.push({ source: s.id, target: t, type: 'negative', mutual: preferences[t]?.negative?.includes(s.id) }); linkSet.add(key + 'neg'); }
+    });
+  });
+
+  const defs = zoomG.append('defs');
+  defs.selectAll('marker').data(['positive', 'negative']).join('marker')
+    .attr('id', d => `arrow-${d}`).attr('viewBox', '0 -5 10 10')
+    .attr('refX', 0).attr('refY', 0).attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', d => d === 'positive' ? '#10b981' : '#ef4444');
+
+  const nodeRadius = 13;
+
+  // Split links: only positive links attract; negative links handled by custom repulsion
+  const posLinks = links.filter(l => l.type === 'positive');
+  const negLinks = links.filter(l => l.type === 'negative');
+
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(posLinks).id(d => d.id).distance(90).strength(0.4))
+    .force('charge', d3.forceManyBody().strength(-220))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide().radius(28))
+    .force('negRepel', () => {
+      // Push apart nodes connected by negative preferences
+      negLinks.forEach(l => {
+        const s = typeof l.source === 'object' ? l.source : nodes.find(n => n.id === l.source);
+        const t = typeof l.target === 'object' ? l.target : nodes.find(n => n.id === l.target);
+        if (!s || !t) return;
+        let dx = t.x - s.x, dy = t.y - s.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        if (dist < 200) {
+          const strength = (l.mutual ? 1.5 : 0.8) * (200 - dist) / 200;
+          const fx = (dx / dist) * strength;
+          const fy = (dy / dist) * strength;
+          s.vx -= fx; s.vy -= fy;
+          t.vx += fx; t.vy += fy;
+        }
+      });
+    });
+
+  let tickCount = 0;
+  const link = zoomG.append('g').attr('opacity', 0).selectAll('line').data(links).join('line')
+    .attr('stroke', d => d.type === 'positive' ? '#10b981' : '#ef4444')
+    .attr('stroke-opacity', d => d.mutual ? 0.7 : 0.3)
+    .attr('stroke-width', d => d.mutual ? 2.5 : 1.2)
+    .attr('marker-end', d => d.mutual ? null : `url(#arrow-${d.type})`);
+
+  const nodeG = zoomG.append('g').selectAll('g').data(nodes).join('g')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+    );
+  nodeG.append('circle').attr('r', nodeRadius)
+    .attr('fill', d => d.group >= 0 ? GROUP_COLORS[d.group % GROUP_COLORS.length] : 'rgba(255,255,255,0.05)')
+    .attr('stroke', d => d.group >= 0 ? GROUP_DOT_COLORS[d.group % GROUP_DOT_COLORS.length] : '#444')
+    .attr('stroke-width', 2);
+  nodeG.append('text').text(d => d.name).attr('dy', -19).attr('text-anchor', 'middle')
+    .attr('fill', '#9ca0b8').attr('font-size', '10.5px').attr('font-weight', '500')
+    .attr('class', 'network-label')
+    .style('display', networkShowNames ? null : 'none');
+
+  simulation.on('tick', () => {
+    tickCount++;
+    // Fade in links after simulation settles a bit (avoids 0,0 flash)
+    if (tickCount === 3) link.node()?.parentNode && d3.select(link.node().parentNode).transition().duration(300).attr('opacity', 1);
+    // Shorten lines to stop at circle edge (prevents arrow overlap)
+    link.each(function(d) {
+      const dx = d.target.x - d.source.x;
+      const dy = d.target.y - d.source.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Hide lines with zero-length or uninitialized positions
+      if (!dist || dist < 1) {
+        d3.select(this).attr('x1', -9999).attr('y1', -9999).attr('x2', -9999).attr('y2', -9999);
+        return;
+      }
+      const offsetS = nodeRadius + 2;
+      const offsetT = nodeRadius + (d.mutual ? 2 : 10); // extra offset for arrowhead
+      const sx = d.source.x + (dx / dist) * offsetS;
+      const sy = d.source.y + (dy / dist) * offsetS;
+      const tx = d.target.x - (dx / dist) * offsetT;
+      const ty = d.target.y - (dy / dist) * offsetT;
+      d3.select(this).attr('x1', sx).attr('y1', sy).attr('x2', tx).attr('y2', ty);
+    });
+    nodeG.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+
+function toggleNetworkNames() {
+  networkShowNames = document.getElementById('networkNameToggle')?.checked ?? true;
+  d3.selectAll('.network-label').style('display', networkShowNames ? null : 'none');
+}
+
+// ============ INSIGHTS ============
+function renderInsights() {
+  const container = document.getElementById('insightsView');
+  if (!groups.length) return;
+  const getName = id => students.find(s => s.id === id)?.name || id;
+
+  let totalPrefs = 0, satisfiedPrefs = 0;
+  let posTotal = 0, posSatisfied = 0, negTotal = 0, negSatisfied = 0;
+  const studentSatisfaction = {};
+
+  students.forEach(s => {
+    const pos = preferences[s.id]?.positive || [];
+    const neg = preferences[s.id]?.negative || [];
+    const myGroup = groups.find(g => g.includes(s.id)) || [];
+    let sat = 0, tot = pos.length + neg.length;
+    pos.forEach(p => { posTotal++; if (myGroup.includes(p)) { posSatisfied++; sat++; } });
+    neg.forEach(n => { negTotal++; if (!myGroup.includes(n)) { negSatisfied++; sat++; } });
+    totalPrefs += tot; satisfiedPrefs += sat;
+    studentSatisfaction[s.id] = tot > 0 ? Math.round((sat / tot) * 100) : null;
+  });
+
+  const overallPct = totalPrefs > 0 ? Math.round((satisfiedPrefs / totalPrefs) * 100) : 100;
+  const posPct = posTotal > 0 ? Math.round((posSatisfied / posTotal) * 100) : 100;
+  const negPct = negTotal > 0 ? Math.round((negSatisfied / negTotal) * 100) : 100;
+
+  const conflicts = [];
+  groups.forEach((g, gi) => g.forEach(sid => {
+    (preferences[sid]?.negative || []).forEach(nid => {
+      if (g.includes(nid) && !conflicts.find(c => c.a === nid && c.b === sid))
+        conflicts.push({ a: sid, b: nid, group: gi });
+    });
+  }));
+
+  const mutualPos = [], mutualNeg = [];
+  students.forEach(s => {
+    (preferences[s.id]?.positive || []).forEach(t => {
+      if (preferences[t]?.positive?.includes(s.id) && !mutualPos.find(m => m.b === s.id && m.a === t))
+        mutualPos.push({ a: s.id, b: t });
+    });
+    (preferences[s.id]?.negative || []).forEach(t => {
+      if (preferences[t]?.negative?.includes(s.id) && !mutualNeg.find(m => m.b === s.id && m.a === t))
+        mutualNeg.push({ a: s.id, b: t });
+    });
+  });
+
+  const isolated = students.filter(s => {
+    const given = (preferences[s.id]?.positive.length || 0) + (preferences[s.id]?.negative.length || 0);
+    const received = students.filter(o => preferences[o.id]?.positive.includes(s.id) || preferences[o.id]?.negative.includes(s.id)).length;
+    return given === 0 && received === 0;
+  });
+
+  const satEntries = Object.entries(studentSatisfaction).filter(([, v]) => v !== null).sort((a, b) => a[1] - b[1]);
+  const leastSatisfied = satEntries.slice(0, 3);
+
+  const popularityCounts = {};
+  students.forEach(s => { popularityCounts[s.id] = students.filter(o => preferences[o.id]?.positive?.includes(s.id)).length; });
+  const mostPopular = Object.entries(popularityCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  let html = '<div class="insights-grid">';
+
+  html += `<div class="insight-card">
+    <h4>Overall Satisfaction</h4>
+    <div class="value" style="color:${overallPct >= 70 ? '#34d399' : overallPct >= 40 ? '#fcd34d' : '#f87171'};">${overallPct}%</div>
+    <div class="detail">${satisfiedPrefs} of ${totalPrefs} preferences satisfied</div>
+    <div class="stat-bar"><div class="stat-bar-fill" style="width:${overallPct}%;background:linear-gradient(90deg,#10b981,#34d399);"></div></div>
+  </div>`;
+
+  html += `<div class="insight-card">
+    <h4>Positive Prefs Met</h4>
+    <div class="value" style="color:#34d399;">${posPct}%</div>
+    <div class="detail">${posSatisfied} of ${posTotal} "want to work with" honoured</div>
+    <div class="stat-bar"><div class="stat-bar-fill" style="width:${posPct}%;background:#10b981;"></div></div>
+  </div>`;
+
+  html += `<div class="insight-card">
+    <h4>Negative Prefs Met</h4>
+    <div class="value" style="color:#7dd3fc;">${negPct}%</div>
+    <div class="detail">${negSatisfied} of ${negTotal} "want to avoid" honoured</div>
+    <div class="stat-bar"><div class="stat-bar-fill" style="width:${negPct}%;background:#0ea5e9;"></div></div>
+  </div>`;
+
+  html += `<div class="insight-card">
+    <h4>Group Sizes</h4>
+    <ul>${groups.map((g, i) => {
+      const ci = i % GROUP_TEXT_COLORS.length;
+      return `<li style="color:${GROUP_TEXT_COLORS[ci]}">Group ${i+1}: ${g.length} students (${calcGroupSatisfaction(g)}% satisfied)</li>`;
+    }).join('')}</ul>
+  </div>`;
+
+  html += `<div class="insight-card">
+    <h4 style="color:${conflicts.length ? '#f87171' : '#34d399'};">Active Conflicts</h4>
+    <div class="value" style="color:${conflicts.length ? '#f87171' : '#34d399'};">${conflicts.length}</div>
+    ${conflicts.length
+      ? '<ul>' + conflicts.map(c => `<li style="color:#fca5a5;">${getName(c.a)} &harr; ${getName(c.b)} (Group ${c.group+1})</li>`).join('') + '</ul>'
+      : '<div class="detail">No students placed with someone they want to avoid</div>'}
+  </div>`;
+
+  html += `<div class="insight-card">
+    <h4>Mutual Preferences</h4>
+    <div class="detail" style="margin-bottom:6px;">${mutualPos.length} mutual positive &middot; ${mutualNeg.length} mutual negative</div>
+    <ul>
+    ${mutualPos.map(m => {
+      const together = groups.some(g => g.includes(m.a) && g.includes(m.b));
+      return `<li><span style="color:#34d399;">&#9829;</span> ${getName(m.a)} &harr; ${getName(m.b)} ${together ? '<span style="color:#34d399;font-size:0.72rem;">together</span>' : '<span style="color:#fcd34d;font-size:0.72rem;">separated</span>'}</li>`;
+    }).join('')}
+    ${mutualNeg.map(m => {
+      const together = groups.some(g => g.includes(m.a) && g.includes(m.b));
+      return `<li><span style="color:#f87171;">&#9888;</span> ${getName(m.a)} &harr; ${getName(m.b)} ${!together ? '<span style="color:#34d399;font-size:0.72rem;">separated</span>' : '<span style="color:#f87171;font-size:0.72rem;">together!</span>'}</li>`;
+    }).join('')}
+    </ul>
+  </div>`;
+
+  if (leastSatisfied.length) {
+    html += `<div class="insight-card">
+      <h4>Students to Watch</h4>
+      <div class="detail">Lowest preference satisfaction</div>
+      <ul>${leastSatisfied.map(([id, pct]) => `<li>${getName(id)}: <span style="color:${pct >= 50 ? '#fcd34d' : '#f87171'}">${pct}%</span></li>`).join('')}</ul>
+    </div>`;
+  }
+
+  if (mostPopular.some(([, c]) => c > 0)) {
+    html += `<div class="insight-card">
+      <h4>Most Sought-After</h4>
+      <div class="detail">Students others want to work with</div>
+      <ul>${mostPopular.filter(([, c]) => c > 0).map(([id, c]) => `<li>${getName(id)}: chosen by ${c} student${c > 1 ? 's' : ''}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  if (isolated.length) {
+    html += `<div class="insight-card">
+      <h4 style="color:#fcd34d;">Socially Isolated</h4>
+      <div class="detail">No preferences given or received</div>
+      <ul>${isolated.map(s => `<li>${s.name}</li>`).join('')}</ul>
+    </div>`;
+  }
+
+  // ---- Impossibilities / Mathematical Constraints ----
+  const impossibilities = [];
+  const numG = groups.length || calcNumGroups();
+  const maxGroupSize = groupMode === 'groupSize'
+    ? Math.max(2, parseInt(document.getElementById('groupSizeMax')?.value) || 6)
+    : Math.ceil(students.length / numG);
+
+  // 1. Contradictory preferences: A wants B, but B wants to avoid A
+  students.forEach(s => {
+    (preferences[s.id]?.positive || []).forEach(tid => {
+      if (preferences[tid]?.negative?.includes(s.id)) {
+        const key = [s.id, tid].sort().join('-');
+        if (!impossibilities.find(i => i.type === 'contradiction' && i.key === key)) {
+          impossibilities.push({
+            type: 'contradiction', key,
+            text: `${getName(s.id)} wants to work with ${getName(tid)}, but ${getName(tid)} wants to avoid ${getName(s.id)}`
+          });
+        }
+      }
+    });
+  });
+
+  // 2. Mutual avoidance cliques too large for available groups (pigeonhole)
+  // Find connected components of mutual avoidance
+  const avoidGraph = {};
+  students.forEach(s => { avoidGraph[s.id] = new Set(); });
+  mutualNeg.forEach(m => { avoidGraph[m.a].add(m.b); avoidGraph[m.b].add(m.a); });
+  // Find largest clique in avoidance graph (brute force for small sizes)
+  // A clique of size > numGroups means they can't all be separated
+  function findAvoidCliques(graph, ids) {
+    const cliques = [];
+    // Check all mutual-avoid pairs and extend greedily
+    const checked = new Set();
+    ids.forEach(id => {
+      const neighbours = graph[id];
+      if (!neighbours || neighbours.size === 0) return;
+      let clique = [id];
+      neighbours.forEach(nid => {
+        if (clique.every(cid => graph[nid]?.has(cid))) clique.push(nid);
+      });
+      if (clique.length > numG) {
+        const key = clique.sort().join(',');
+        if (!checked.has(key)) {
+          checked.add(key);
+          cliques.push(clique);
+        }
+      }
+    });
+    return cliques;
+  }
+  const avoidCliques = findAvoidCliques(avoidGraph, students.map(s => s.id));
+  avoidCliques.forEach(clique => {
+    impossibilities.push({
+      type: 'avoidance-overflow',
+      text: `${clique.map(getName).join(', ')} all mutually want to avoid each other (${clique.length} students, only ${numG} groups) — at least 2 must share a group`
+    });
+  });
+
+  // 3. Positive cliques too large for max group size
+  const posGraph = {};
+  students.forEach(s => { posGraph[s.id] = new Set(); });
+  mutualPos.forEach(m => { posGraph[m.a].add(m.b); posGraph[m.b].add(m.a); });
+  const posChecked = new Set();
+  students.forEach(s => {
+    const neighbours = posGraph[s.id];
+    if (!neighbours || neighbours.size === 0) return;
+    let clique = [s.id];
+    neighbours.forEach(nid => {
+      if (clique.every(cid => posGraph[nid]?.has(cid))) clique.push(nid);
+    });
+    if (clique.length > maxGroupSize) {
+      const key = clique.sort().join(',');
+      if (!posChecked.has(key)) {
+        posChecked.add(key);
+        impossibilities.push({
+          type: 'size-overflow',
+          text: `${clique.map(getName).join(', ')} all mutually want to work together (${clique.length} students) but max group size is ${maxGroupSize}`
+        });
+      }
+    }
+  });
+
+  // 4. One-directional avoidance chain impossibility: student has more "avoid" targets than numGroups - 1
+  students.forEach(s => {
+    const avoids = preferences[s.id]?.negative || [];
+    if (avoids.length >= numG) {
+      impossibilities.push({
+        type: 'too-many-avoids',
+        text: `${getName(s.id)} wants to avoid ${avoids.length} students but there are only ${numG} groups — at least ${avoids.length - numG + 1} conflict(s) are unavoidable`
+      });
+    }
+  });
+
+  // 5. Students who can't have even 1 preference satisfied
+  // A positive pref is "blocked" if the target avoids them back
+  // A negative pref is "blocked" if the avoided student appears in every possible group (only 1 group) — rare
+  // More practically: check if ALL of a student's preferences are contradicted
+  students.forEach(s => {
+    const pos = preferences[s.id]?.positive || [];
+    const neg = preferences[s.id]?.negative || [];
+    if (pos.length + neg.length === 0) return; // no prefs = nothing to check
+
+    // Count how many positive prefs are blocked (target avoids them)
+    const blockedPos = pos.filter(tid => preferences[tid]?.negative?.includes(s.id));
+    // Count how many negative prefs are impossible (too many avoids for the groups)
+    // A negative pref is always satisfiable if numGroups > 1, unless ALL their neg targets
+    // must be in the same group (only happens with 1 group)
+    const negSatisfiable = numG > 1 ? neg.length : 0;
+    const posSatisfiable = pos.length - blockedPos.length;
+
+    if (posSatisfiable === 0 && negSatisfiable === 0 && pos.length > 0) {
+      const blockedNames = blockedPos.map(getName).join(', ');
+      impossibilities.push({
+        type: 'no-satisfiable',
+        text: `${getName(s.id)} cannot have any preference met — ${pos.length === 1 ? 'their only choice' : 'all ' + pos.length + ' choices'} (${blockedNames}) want to avoid them${neg.length > 0 && numG <= 1 ? ', and only 1 group exists' : ''}`
+      });
+    }
+  });
+
+  if (impossibilities.length > 0) {
+    const iconMap = { 'contradiction': '&#8644;', 'avoidance-overflow': '&#9888;', 'size-overflow': '&#8599;', 'too-many-avoids': '&#10006;', 'no-satisfiable': '&#9785;' };
+    html += `<div class="insight-card" style="border-color:rgba(251,146,60,0.4);background:rgba(251,146,60,0.04);">
+      <h4 style="color:#fb923c;">Impossible to Fully Satisfy</h4>
+      <div class="detail" style="margin-bottom:6px;">These preference combinations cannot all be met mathematically</div>
+      <ul>${impossibilities.map(i => `<li style="color:#fdba74;margin-bottom:4px;"><span style="opacity:0.6;">${iconMap[i.type] || '&#9888;'}</span> ${i.text}</li>`).join('')}</ul>
+    </div>`;
+  } else if (totalPrefs > 0) {
+    html += `<div class="insight-card" style="border-color:rgba(16,185,129,0.3);background:rgba(16,185,129,0.04);">
+      <h4 style="color:#34d399;">No Impossibilities Detected</h4>
+      <div class="detail">All preferences are theoretically satisfiable with ${numG} groups</div>
+    </div>`;
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+// ============ TABS ============
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+  if (tab === 'network') setTimeout(() => renderNetwork(), 50);
+}
+
+// ============ DEMO ============
+function loadDemo() {
+  clearAll();
+  const names = ['Aroha','Ben','Chloe','Daniel','Emma','Finn','Grace','Hugo','Isla','Jack','Kate','Liam','Mia','Noah','Olivia','Piper'];
+  names.forEach(n => addStudent(n));
+  const byName = name => students.find(s => s.name === name)?.id;
+  const pd = {
+    'Aroha':{pos:['Chloe','Emma'],neg:['Daniel']},'Ben':{pos:['Finn','Jack'],neg:['Grace']},
+    'Chloe':{pos:['Aroha','Isla'],neg:['Hugo']},'Daniel':{pos:['Liam','Noah'],neg:['Aroha']},
+    'Emma':{pos:['Aroha','Grace'],neg:['Ben']},'Finn':{pos:['Ben','Hugo'],neg:['Mia']},
+    'Grace':{pos:['Emma','Kate'],neg:['Ben']},'Hugo':{pos:['Finn','Liam'],neg:['Chloe']},
+    'Isla':{pos:['Chloe','Mia'],neg:['Noah']},'Jack':{pos:['Ben','Noah'],neg:['Piper']},
+    'Kate':{pos:['Grace','Olivia'],neg:['Daniel']},'Liam':{pos:['Daniel','Hugo'],neg:['Isla']},
+    'Mia':{pos:['Isla','Olivia'],neg:['Finn']},'Noah':{pos:['Jack','Daniel'],neg:['Isla']},
+    'Olivia':{pos:['Kate','Mia'],neg:['Liam']},'Piper':{pos:['Grace'],neg:['Jack']},
+  };
+  for (const [name, prefs] of Object.entries(pd)) {
+    const sid = byName(name); if (!sid) continue;
+    preferences[sid].positive = prefs.pos.map(byName).filter(Boolean);
+    preferences[sid].negative = prefs.neg.map(byName).filter(Boolean);
+  }
+  renderStudentList(); updatePrefDropdowns();
+  document.getElementById('numGroups').value = 4;
+  allocateGroups();
+}
+
+// ============ SAVE / LOAD LAYOUTS ============
+const LAYOUTS_KEY = 'groupAllocator_layouts';
+
+function getSavedLayouts() {
+  try { return JSON.parse(localStorage.getItem(LAYOUTS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveLayout() {
+  if (!groups.length) { alert('No groups to save.'); return; }
+  const defaultName = 'Layout ' + new Date().toLocaleString('en-AU', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  const name = prompt('Name this layout:', defaultName);
+  if (!name) return;
+
+  const layout = {
+    name,
+    date: new Date().toISOString(),
+    students: students.map(s => ({ ...s })),
+    preferences: JSON.parse(JSON.stringify(preferences)),
+    groups: groups.map(g => [...g]),
+    groupNames: [...groupNames],
+    lockedGroups: [...lockedGroups],
+    lockedStudents: [...lockedStudents],
+    groupMode,
+    numGroups: document.getElementById('numGroups').value,
+    groupSizeMin: document.getElementById('groupSizeMin').value,
+    groupSizeMax: document.getElementById('groupSizeMax').value,
+  };
+
+  const layouts = getSavedLayouts();
+  layouts.unshift(layout);
+  // Keep max 20 layouts
+  if (layouts.length > 20) layouts.length = 20;
+  localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  alert(`Layout "${name}" saved.`);
+}
+
+function showLoadLayoutMenu(event) {
+  const layouts = getSavedLayouts();
+  if (!layouts.length) { alert('No saved layouts.'); return; }
+
+  // Remove existing menu if any
+  document.getElementById('layoutMenuRoot')?.remove();
+
+  const rect = event.target.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.id = 'layoutMenuRoot';
+  menu.innerHTML = `
+    <div style="position:fixed;inset:0;z-index:199;" onclick="this.parentElement.remove()"></div>
+    <div style="position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:200;
+      background:linear-gradient(180deg,#1c2030,#181c28);border:1px solid rgba(255,255,255,0.1);
+      border-radius:12px;padding:8px;min-width:260px;max-width:340px;max-height:320px;overflow-y:auto;
+      box-shadow:0 12px 32px rgba(0,0,0,0.5);animation:popIn 0.15s ease-out;">
+      <div style="font-size:0.72rem;color:#454868;font-weight:600;text-transform:uppercase;letter-spacing:0.1em;padding:4px 8px;margin-bottom:4px;">Saved Layouts</div>
+      ${layouts.map((l, i) => {
+        const d = new Date(l.date);
+        const dateStr = d.toLocaleString('en-AU', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        const studentCount = l.students?.length || 0;
+        const groupCount = l.groups?.length || 0;
+        return `<div style="display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:8px;cursor:pointer;transition:background 0.15s;font-size:0.8rem;"
+          onmouseover="this.style.background='rgba(99,102,241,0.1)'" onmouseout="this.style.background='transparent'"
+          onclick="loadLayout(${i});this.closest('#layoutMenuRoot').remove()">
+          <div style="flex:1;">
+            <div style="color:#c4c8e0;font-weight:500;">${l.name}</div>
+            <div style="color:#454868;font-size:0.68rem;">${dateStr} &middot; ${studentCount} students &middot; ${groupCount} groups</div>
+          </div>
+          <button style="background:none;border:none;color:#3a2020;cursor:pointer;font-size:0.85rem;padding:2px 4px;transition:color 0.15s;"
+            onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#3a2020'"
+            onclick="event.stopPropagation();deleteLayout(${i});this.closest('#layoutMenuRoot').remove()" title="Delete">&times;</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  document.body.appendChild(menu);
+}
+
+function loadLayout(index) {
+  const layouts = getSavedLayouts();
+  const layout = layouts[index];
+  if (!layout) return;
+
+  students = layout.students || [];
+  preferences = layout.preferences || {};
+  groups = layout.groups || [];
+  groupNames = layout.groupNames || [];
+  lockedGroups = layout.lockedGroups || [];
+  lockedStudents = new Set(layout.lockedStudents || []);
+  idCounter = Math.max(idCounter, ...students.map(s => parseInt(s.id.replace('s','')) || 0));
+
+  if (layout.groupMode) {
+    groupMode = layout.groupMode;
+    setGroupMode(groupMode);
+  }
+  if (layout.numGroups) document.getElementById('numGroups').value = layout.numGroups;
+  if (layout.groupSizeMin) document.getElementById('groupSizeMin').value = layout.groupSizeMin;
+  if (layout.groupSizeMax) document.getElementById('groupSizeMax').value = layout.groupSizeMax;
+
+  selectedStudentId = null;
+  renderStudentList(); updatePrefDropdowns(); updateBadge();
+  renderGroups(); renderInsights();
+  switchTab('groups');
+}
+
+function deleteLayout(index) {
+  const layouts = getSavedLayouts();
+  const name = layouts[index]?.name || 'this layout';
+  if (!confirm(`Delete "${name}"?`)) return;
+  layouts.splice(index, 1);
+  localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+}
+</script>
+</body>
+</html>
