@@ -489,6 +489,35 @@
     .main-layout { flex-direction: column; height: auto; }
     .sidebar { width: 100%; min-width: auto; max-height: 50vh; }
   }
+
+  /* ===== LOADING OVERLAY ===== */
+  .loading-overlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: rgba(8, 10, 16, 0.72); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center;
+    flex-direction: column; gap: 18px;
+  }
+  .loading-overlay.show { display: flex; }
+  .loading-spinner {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 3px solid rgba(99,102,241,0.18);
+    border-top-color: #818cf8;
+    animation: la-spin 0.9s linear infinite;
+  }
+  .loading-text { color: #c4c8e0; font-size: 0.92rem; font-weight: 500; letter-spacing: 0.01em; }
+  .loading-detail { color: #555878; font-size: 0.76rem; }
+  @keyframes la-spin { to { transform: rotate(360deg); } }
+
+  /* Visually-hidden helper for ARIA-only labels */
+  .sr-only {
+    position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+
+  /* Keyboard focus indicator for chips (accessibility) */
+  .student-chip:focus-visible {
+    outline: 2px solid #818cf8; outline-offset: 2px;
+  }
 </style>
 </head>
 <body>
@@ -577,8 +606,8 @@
     </div>
 
     <div class="tab-content">
-      <div class="tab-panel active" id="panel-groups">
-        <div id="groupsView">
+      <div class="tab-panel active" id="panel-groups" role="region" aria-label="Allocated groups">
+        <div id="groupsView" aria-live="polite">
           <div class="empty-state">
             <h3>No groups yet</h3>
             <p>Add students, set their preferences, then click "Allocate Groups".</p>
@@ -683,6 +712,12 @@
 </div>
 
 <!-- Fresh or Append Import -->
+<div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="loading-spinner" aria-hidden="true"></div>
+  <div class="loading-text" id="loadingText">Allocating groups…</div>
+  <div class="loading-detail" id="loadingDetail">Optimizing assignments based on preferences</div>
+</div>
+
 <div class="confirm-overlay" id="importModeOverlay">
   <div class="confirm-box">
     <h4>How would you like to import?</h4>
@@ -707,6 +742,50 @@ let selectedStudentId = null;
 let draggedStudentId = null;
 let idCounter = 0;
 let networkShowNames = true;
+
+// ============ SECURITY HELPERS ============
+// Escape user-supplied strings before inserting into HTML to prevent XSS.
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+// Alias for HTML attribute values — same escape rules as text content.
+const escapeAttr = escapeHtml;
+// Escape for use inside a JS string literal that will itself be embedded in an
+// HTML attribute (e.g. onclick="foo('${escapeJs(name)}')"). Escapes both layers.
+function escapeJs(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+}
+// Safe wrapper around localStorage.setItem that surfaces quota errors.
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return { ok: true };
+  } catch (err) {
+    const isQuota = err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 1014);
+    return {
+      ok: false,
+      error: err,
+      message: isQuota
+        ? 'Browser storage is full. Delete an old saved layout and try again.'
+        : 'Could not save: ' + (err && err.message ? err.message : 'unknown error')
+    };
+  }
+}
 
 const GROUP_COLORS = [
   'rgba(99,102,241,0.12)', 'rgba(16,185,129,0.12)', 'rgba(245,158,11,0.12)',
@@ -746,8 +825,10 @@ function updateBadge() {
 
 // ============ STUDENT MANAGEMENT ============
 function addStudent(name) {
-  name = name || document.getElementById('newStudentName').value.trim();
+  name = (name || document.getElementById('newStudentName').value).trim();
   if (!name) return;
+  // Cap at 80 chars — DOM/render performance + sane UI.
+  if (name.length > 80) name = name.slice(0, 80);
   if (students.find(s => s.name.toLowerCase() === name.toLowerCase())) return;
   const id = 's' + (++idCounter);
   students.push({ name, id });
@@ -872,7 +953,7 @@ function renderColumnMapper(targetId) {
   });
   if (columnMapping.name === -1) columnMapping.name = 0;
 
-  const optionsHtml = (sel) => '<option value="-1">-- Skip --</option>' + headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${h || 'Column ' + (i+1)}</option>`).join('');
+  const optionsHtml = (sel) => '<option value="-1">-- Skip --</option>' + headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h || 'Column ' + (i+1))}</option>`).join('');
   const container = document.getElementById(targetId);
   container.innerHTML = `<div style="margin-top:12px;">
     <strong style="font-size:0.82rem;color:#9ca0b8;">Map your columns:</strong>
@@ -982,8 +1063,9 @@ function updateImportPreview(targetId) {
     if (unmatchedNames.size > 0) {
       const pills = Array.from(unmatchedNames).map(name => {
         const info = unmatchedFirstOccurrence[name.toLowerCase()];
-        const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        return `<span class="err-clickable" onclick="openFixPopover(event,${info.rowIndex},'${info.colType}','${escaped}','${targetId}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:2px 8px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);cursor:pointer;font-size:0.75rem;" title="Click to fix">${name}</span>`;
+        // Double-escape: JS-string-safe, then HTML-attr-safe.
+        const jsSafe = escapeAttr(escapeJs(name));
+        return `<span class="err-clickable" onclick="openFixPopover(event,${info.rowIndex},'${escapeAttr(info.colType)}','${jsSafe}','${escapeAttr(targetId)}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:2px 8px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);cursor:pointer;font-size:0.75rem;" title="Click to fix">${escapeHtml(name)}</span>`;
       });
       unmatchedPills = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">${pills.join('')}</div>`;
     }
@@ -1027,11 +1109,11 @@ function updateImportPreview(targetId) {
 
     // Name cell
     const nameErrs = errs.filter(e => e.col === 'name');
-    let nameHtml = name || '<span style="color:#f87171;font-style:italic;">empty</span>';
+    let nameHtml = name ? escapeHtml(name) : '<span style="color:#f87171;font-style:italic;">empty</span>';
     if (nameErrs.length > 0) {
       const errColor = nameErrs[0].type === 'duplicate' ? '#fbbf24' : '#f87171';
       const errLabel = nameErrs[0].type === 'duplicate' ? 'duplicate' : 'empty';
-      nameHtml = `<span style="color:${errColor};border-bottom:1px dashed ${errColor};" title="${nameErrs[0].detail}">${nameHtml}</span> <span style="font-size:0.65rem;color:${errColor};background:rgba(251,191,36,0.1);padding:1px 5px;border-radius:8px;">${errLabel}</span>`;
+      nameHtml = `<span style="color:${errColor};border-bottom:1px dashed ${errColor};" title="${escapeAttr(nameErrs[0].detail)}">${nameHtml}</span> <span style="font-size:0.65rem;color:${errColor};background:rgba(251,191,36,0.1);padding:1px 5px;border-radius:8px;">${errLabel}</span>`;
     }
 
     // Preference cells with inline error highlighting
@@ -1047,14 +1129,14 @@ function updateImportPreview(targetId) {
 
       const parts = prefNames.map(pn => {
         if (unmatchedSet.has(pn.toLowerCase())) {
-          const escaped = pn.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-          return `<span class="err-clickable" onclick="openFixPopover(event,${ri},'${type}','${escaped}','${targetId}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:1px 6px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);" title="Click to fix: not found in student list">${pn}</span>`;
+          const jsSafe = escapeAttr(escapeJs(pn));
+          return `<span class="err-clickable" onclick="openFixPopover(event,${ri},'${escapeAttr(type)}','${jsSafe}','${escapeAttr(targetId)}')" style="color:#f87171;background:rgba(239,68,68,0.12);padding:1px 6px;border-radius:10px;border:1px solid rgba(239,68,68,0.25);" title="Click to fix: not found in student list">${escapeHtml(pn)}</span>`;
         }
         if (selfRefSet.has(pn.toLowerCase())) {
-          return `<span style="color:#fbbf24;background:rgba(251,191,36,0.1);padding:1px 6px;border-radius:10px;border:1px solid rgba(251,191,36,0.2);cursor:help;" title="Student references themselves">${pn}</span>`;
+          return `<span style="color:#fbbf24;background:rgba(251,191,36,0.1);padding:1px 6px;border-radius:10px;border:1px solid rgba(251,191,36,0.2);cursor:help;" title="Student references themselves">${escapeHtml(pn)}</span>`;
         }
         const color = type === 'positive' ? '#6ee7b7' : '#fca5a5';
-        return `<span style="color:${color};">${pn}</span>`;
+        return `<span style="color:${color};">${escapeHtml(pn)}</span>`;
       });
       return `<td>${parts.join('<span style="color:#333;">, </span>')}</td>`;
     }
@@ -1090,7 +1172,7 @@ function executeImport(targetId, forceImport, importMode) {
         const icon = i.type === 'unmatched' ? '<span style="color:#f87171;">&#9888;</span>'
           : i.type === 'duplicate' ? '<span style="color:#fbbf24;">&#9888;</span>'
           : '<span style="color:#fbbf24;">&#9888;</span>';
-        return `<li>${icon} ${i.detail}</li>`;
+        return `<li>${icon} ${escapeHtml(i.detail)}</li>`;
       }).join('');
       if (issues.length > 15) list.innerHTML += `<li style="color:#4b5072;font-style:italic;">...and ${issues.length - 15} more</li>`;
       document.getElementById('confirmImportBtn').onclick = () => {
@@ -1211,17 +1293,16 @@ function openFixPopover(event, rowIndex, colType, badName, targetId) {
   let suggestionsHtml = '';
   if (suggestions.length > 0) {
     suggestionsHtml = `<div class="fix-label">Did you mean:</div>` +
-      suggestions.map(s => `<div class="fix-suggestion" onclick="applyFix('${s.name.replace(/'/g, "\\'")}')">${s.name}</div>`).join('');
+      suggestions.map(s => `<div class="fix-suggestion" onclick="applyFix('${escapeAttr(escapeJs(s.name))}')">${escapeHtml(s.name)}</div>`).join('');
   }
 
-  const escapedBad = badName.replace(/"/g, '&quot;');
   document.getElementById('fixPopoverRoot').innerHTML = `
     <div class="fix-backdrop" onclick="closeFixPopover()"></div>
-    <div class="fix-popover" style="top:${top}px;left:${left}px;">
-      <h4>"${badName}" not found</h4>
+    <div class="fix-popover" style="top:${top}px;left:${left}px;" role="dialog" aria-label="Fix unmatched name">
+      <h4>"${escapeHtml(badName)}" not found</h4>
       ${suggestionsHtml}
       <div class="fix-label" style="margin-top:6px;">Or type the correct name:</div>
-      <input type="text" id="fixNameInput" value="${escapedBad}" onkeydown="if(event.key==='Enter')applyFix(this.value)">
+      <input type="text" id="fixNameInput" value="${escapeAttr(badName)}" onkeydown="if(event.key==='Enter')applyFix(this.value)">
       <div class="fix-actions">
         <button class="btn btn-success btn-sm" onclick="applyFix(document.getElementById('fixNameInput').value)">Fix</button>
         <button class="btn btn-primary btn-sm" onclick="applyFixAddNew()">Add as New Student</button>
@@ -1365,7 +1446,7 @@ function renderStudentList() {
     const pos = preferences[s.id]?.positive.length || 0;
     const neg = preferences[s.id]?.negative.length || 0;
     const prefText = (pos || neg) ? `<span class="pref-count">${pos > 0 ? '+' + pos : ''}${neg > 0 ? ' -' + neg : ''}</span>` : '';
-    return `<li><span class="name">${s.name}</span>${prefText}<button class="remove-btn" onclick="removeStudent('${s.id}')">&times;</button></li>`;
+    return `<li><span class="name">${escapeHtml(s.name)}</span>${prefText}<button class="remove-btn" aria-label="Remove ${escapeAttr(s.name)}" onclick="removeStudent('${escapeAttr(s.id)}')">&times;</button></li>`;
   }).join('');
 }
 
@@ -1373,7 +1454,7 @@ function updatePrefDropdowns() {
   const sel = document.getElementById('prefStudent');
   const current = sel.value;
   sel.innerHTML = '<option value="">-- Choose student --</option>' +
-    students.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    students.map(s => `<option value="${escapeAttr(s.id)}">${escapeHtml(s.name)}</option>`).join('');
   if (students.find(s => s.id === current)) sel.value = current;
 }
 
@@ -1383,20 +1464,20 @@ function renderPrefEditor() {
   if (!sid) { area.innerHTML = ''; return; }
   const pref = preferences[sid];
   const others = students.filter(s => s.id !== sid);
-  const getName = id => students.find(s => s.id === id)?.name || '';
+  const getName = id => escapeHtml(students.find(s => s.id === id)?.name || '');
   let html = '<div class="pref-editor">';
   html += '<div style="margin-bottom:10px;"><strong style="color:#34d399;font-size:0.78rem;font-weight:600;">WANTS TO WORK WITH</strong>';
   pref.positive.forEach((pid, i) => {
-    html += `<div class="pref-row"><span class="pref-badge-pos">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${sid}','positive',${i})">Remove</button></div>`;
+    html += `<div class="pref-row"><span class="pref-badge-pos">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${escapeAttr(sid)}','positive',${i})">Remove</button></div>`;
   });
   const posOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
-  html += `<div class="pref-row"><select id="addPosSelect"><option value="">+ Add...</option>${posOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join('')}</select><button class="btn btn-success btn-sm" onclick="addPref('${sid}','positive')">Add</button></div></div>`;
+  html += `<div class="pref-row"><select id="addPosSelect"><option value="">+ Add...</option>${posOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-success btn-sm" onclick="addPref('${escapeAttr(sid)}','positive')">Add</button></div></div>`;
   html += '<div><strong style="color:#f87171;font-size:0.78rem;font-weight:600;">WANTS TO AVOID</strong>';
   pref.negative.forEach((pid, i) => {
-    html += `<div class="pref-row"><span class="pref-badge-neg">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${sid}','negative',${i})">Remove</button></div>`;
+    html += `<div class="pref-row"><span class="pref-badge-neg">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${escapeAttr(sid)}','negative',${i})">Remove</button></div>`;
   });
   const negOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
-  html += `<div class="pref-row"><select id="addNegSelect"><option value="">+ Add...</option>${negOpts.map(o => `<option value="${o.id}">${o.name}</option>`).join('')}</select><button class="btn btn-danger btn-sm" onclick="addPref('${sid}','negative')">Add</button></div></div>`;
+  html += `<div class="pref-row"><select id="addNegSelect"><option value="">+ Add...</option>${negOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-danger btn-sm" onclick="addPref('${escapeAttr(sid)}','negative')">Add</button></div></div>`;
   html += '</div>';
   area.innerHTML = html;
 }
@@ -1460,8 +1541,172 @@ function calcNumGroups() {
   return Math.round((lo + hi) / 2);
 }
 
+// ============ PURE SCORING FUNCTIONS ============
+// Extracted to module scope so they can be unit-tested.
+// `prefs` shape: { studentId: { positive: [ids], negative: [ids] } }
+function scorePair(prefs, a, b) {
+  let s = 0;
+  if (prefs[a]?.positive?.includes(b)) s += 2;
+  if (prefs[b]?.positive?.includes(a)) s += 2;
+  if (prefs[a]?.negative?.includes(b)) s -= 3;
+  if (prefs[b]?.negative?.includes(a)) s -= 3;
+  return s;
+}
+function scoreGroup(prefs, g) {
+  let t = 0;
+  for (let i = 0; i < g.length; i++)
+    for (let j = i + 1; j < g.length; j++)
+      t += scorePair(prefs, g[i], g[j]);
+  return t;
+}
+function scoreTotal(prefs, gs) {
+  return gs.reduce((s, g) => s + scoreGroup(prefs, g), 0);
+}
+function scoreSizePenalty(gs, sizeConstraints) {
+  if (!sizeConstraints) return 0;
+  let pen = 0;
+  gs.forEach(g => {
+    if (g.length < sizeConstraints.min) pen -= (sizeConstraints.min - g.length) * 10;
+    if (g.length > sizeConstraints.max) pen -= (g.length - sizeConstraints.max) * 10;
+  });
+  return pen;
+}
+function scoreFull(prefs, gs, sizeConstraints) {
+  return scoreTotal(prefs, gs) + scoreSizePenalty(gs, sizeConstraints);
+}
+
+// ============ TEST RUNNER ============
+// Run via URL ?test=1 or by calling runScoringTests() in the console.
+function runScoringTests() {
+  const results = [];
+  const t = (name, fn) => {
+    try { fn(); results.push({ name, ok: true }); }
+    catch (e) { results.push({ name, ok: false, error: e.message }); }
+  };
+  const eq = (actual, expected, msg) => {
+    if (actual !== expected) throw new Error(`${msg || ''} expected ${expected}, got ${actual}`);
+  };
+
+  // ---- scorePair ----
+  t('scorePair: mutual positive = +4', () => {
+    const p = { a: { positive: ['b'], negative: [] }, b: { positive: ['a'], negative: [] } };
+    eq(scorePair(p, 'a', 'b'), 4);
+  });
+  t('scorePair: one-way positive = +2', () => {
+    const p = { a: { positive: ['b'], negative: [] }, b: { positive: [], negative: [] } };
+    eq(scorePair(p, 'a', 'b'), 2);
+  });
+  t('scorePair: mutual negative = -6', () => {
+    const p = { a: { positive: [], negative: ['b'] }, b: { positive: [], negative: ['a'] } };
+    eq(scorePair(p, 'a', 'b'), -6);
+  });
+  t('scorePair: contradictory (a wants b, b avoids a) = +2 - 3 = -1', () => {
+    const p = { a: { positive: ['b'], negative: [] }, b: { positive: [], negative: ['a'] } };
+    eq(scorePair(p, 'a', 'b'), -1);
+  });
+  t('scorePair: no prefs = 0', () => {
+    const p = { a: { positive: [], negative: [] }, b: { positive: [], negative: [] } };
+    eq(scorePair(p, 'a', 'b'), 0);
+  });
+  t('scorePair: missing prefs entry = 0 (no crash)', () => {
+    eq(scorePair({}, 'a', 'b'), 0);
+  });
+  t('scorePair: symmetric — order does not matter', () => {
+    const p = { a: { positive: ['b'], negative: [] }, b: { positive: ['a'], negative: [] } };
+    eq(scorePair(p, 'a', 'b'), scorePair(p, 'b', 'a'));
+  });
+
+  // ---- scoreGroup ----
+  t('scoreGroup: empty group = 0', () => {
+    eq(scoreGroup({}, []), 0);
+  });
+  t('scoreGroup: singleton = 0', () => {
+    eq(scoreGroup({}, ['a']), 0);
+  });
+  t('scoreGroup: triangle of mutual positives = 3 pairs * 4 = 12', () => {
+    const p = {
+      a: { positive: ['b','c'], negative: [] },
+      b: { positive: ['a','c'], negative: [] },
+      c: { positive: ['a','b'], negative: [] },
+    };
+    eq(scoreGroup(p, ['a','b','c']), 12);
+  });
+
+  // ---- scoreSizePenalty ----
+  t('scoreSizePenalty: null constraints = 0', () => {
+    eq(scoreSizePenalty([['a'],['b']], null), 0);
+  });
+  t('scoreSizePenalty: undersized group penalised', () => {
+    eq(scoreSizePenalty([['a']], { min: 3, max: 5 }), -20); // (3-1)*10 = 20
+  });
+  t('scoreSizePenalty: oversized group penalised', () => {
+    eq(scoreSizePenalty([['a','b','c','d','e','f','g']], { min: 3, max: 5 }), -20); // (7-5)*10
+  });
+  t('scoreSizePenalty: in-range group = 0', () => {
+    eq(scoreSizePenalty([['a','b','c','d']], { min: 3, max: 5 }), 0);
+  });
+
+  // ---- scoreTotal / scoreFull ----
+  t('scoreTotal: sum across groups', () => {
+    const p = {
+      a: { positive: ['b'], negative: [] },
+      b: { positive: ['a'], negative: [] },
+      c: { positive: ['d'], negative: [] },
+      d: { positive: ['c'], negative: [] },
+    };
+    eq(scoreTotal(p, [['a','b'], ['c','d']]), 8); // 4 + 4
+  });
+  t('scoreFull: combines preference + size', () => {
+    const p = { a: { positive: ['b'], negative: [] }, b: { positive: ['a'], negative: [] } };
+    // Pair score 4, but min=3 means penalty -10 (3-2)*10
+    eq(scoreFull(p, [['a','b']], { min: 3, max: 5 }), -6);
+  });
+
+  // ---- Render summary ----
+  const passed = results.filter(r => r.ok).length;
+  const failed = results.length - passed;
+  const lines = results.map(r => r.ok ? `✅ ${r.name}` : `❌ ${r.name} — ${r.error}`);
+  console.group(`Scoring tests: ${passed}/${results.length} passed`);
+  lines.forEach(l => console.log(l));
+  console.groupEnd();
+  return { passed, failed, total: results.length, results };
+}
+
 // ============ GROUP ALLOCATION ============
+function showLoading(text, detail) {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  if (text) document.getElementById('loadingText').textContent = text;
+  if (detail) document.getElementById('loadingDetail').textContent = detail;
+  overlay.classList.add('show');
+  overlay.setAttribute('aria-hidden', 'false');
+}
+function hideLoading() {
+  const overlay = document.getElementById('loadingOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('show');
+  overlay.setAttribute('aria-hidden', 'true');
+}
+
+// Public entry: show spinner, yield to the browser, then run the allocation.
+// For tiny problems (< 12 students) the work is fast enough that we skip the
+// overlay flicker entirely.
 function allocateGroups() {
+  if (students.length < 2) return;
+  const heavy = students.length >= 12;
+  if (heavy) {
+    showLoading('Allocating groups…', `Optimizing ${students.length} students into groups`);
+    // Two RAF + setTimeout to guarantee the overlay paints before the
+    // synchronous allocator blocks the main thread.
+    requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
+      try { _allocateGroupsImpl(); } finally { hideLoading(); }
+    }, 0)));
+  } else {
+    _allocateGroupsImpl();
+  }
+}
+
+function _allocateGroupsImpl() {
   if (students.length < 2) return;
   const sizeConstraints = groupMode === 'groupSize' ? {
     min: Math.max(2, parseInt(document.getElementById('groupSizeMin').value) || 4),
@@ -1498,31 +1743,12 @@ function allocateGroups() {
   // Students to allocate are those not pinned
   const freeStudents = students.filter(s => !pinnedStudentIds.has(s.id));
 
-  function pairScore(a, b) {
-    let s = 0;
-    if (preferences[a]?.positive.includes(b)) s += 2;
-    if (preferences[b]?.positive.includes(a)) s += 2;
-    if (preferences[a]?.negative.includes(b)) s -= 3;
-    if (preferences[b]?.negative.includes(a)) s -= 3;
-    return s;
-  }
-  function groupScore(g) {
-    let t = 0;
-    for (let i = 0; i < g.length; i++) for (let j = i+1; j < g.length; j++) t += pairScore(g[i], g[j]);
-    return t;
-  }
-  function totalScore(gs) { return gs.reduce((s, g) => s + groupScore(g), 0); }
-
-  function sizePenalty(gs) {
-    if (!sizeConstraints) return 0;
-    let pen = 0;
-    gs.forEach(g => {
-      if (g.length < sizeConstraints.min) pen -= (sizeConstraints.min - g.length) * 10;
-      if (g.length > sizeConstraints.max) pen -= (g.length - sizeConstraints.max) * 10;
-    });
-    return pen;
-  }
-  function fullScore(gs) { return totalScore(gs) + sizePenalty(gs); }
+  // Bound aliases to the module-level pure functions (covered by runScoringTests).
+  const pairScore = (a, b) => scorePair(preferences, a, b);
+  const groupScore = (g) => scoreGroup(preferences, g);
+  const totalScore = (gs) => scoreTotal(preferences, gs);
+  const sizePenalty = (gs) => scoreSizePenalty(gs, sizeConstraints);
+  const fullScore = (gs) => scoreFull(preferences, gs, sizeConstraints);
 
   if (freeStudents.length === 0 && groups.length > 0) {
     renderGroups(); renderInsights(); renderNetwork(); switchTab('groups');
@@ -1641,7 +1867,7 @@ function getRelatedStudents(sid) {
 function renderGroups() {
   const container = document.getElementById('groupsView');
   if (!groups.length) return;
-  const getName = id => students.find(s => s.id === id)?.name || id;
+  const getName = id => escapeHtml(students.find(s => s.id === id)?.name || id);
   const activeId = draggedStudentId || selectedStudentId;
   const related = getRelatedStudents(activeId);
 
@@ -1650,7 +1876,7 @@ function renderGroups() {
   html += `<button class="btn btn-secondary btn-sm" onclick="exportToExcel()">Export Spreadsheet</button>`;
   html += `<button class="btn btn-secondary btn-sm" onclick="saveLayout()">Save Layout</button>`;
   html += `<button class="btn btn-secondary btn-sm" onclick="showLoadLayoutMenu(event)">Load Layout</button>`;
-  html += `<span class="hint">Click a student to see preferences &middot; Drag to move between groups</span>`;
+  html += `<span class="hint">Click a student to see preferences &middot; Drag to move between groups &middot; <strong>Keyboard:</strong> Tab to focus, Enter = select, Space = pin, Ctrl+&larr;/&rarr; = move group</span>`;
   html += '</div>';
   // Colour legend
   html += `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding:8px 12px;background:rgba(255,255,255,0.02);border-radius:10px;border:1px solid rgba(255,255,255,0.04);font-size:0.72rem;align-items:center;">
@@ -1669,23 +1895,28 @@ function renderGroups() {
     const ci = gi % GROUP_COLORS.length;
     const score = calcGroupSatisfaction(g);
     const isLocked = lockedGroups[gi] || false;
-    const displayName = groupNames[gi] || `Group ${gi+1}`;
+    const rawDisplayName = groupNames[gi] || `Group ${gi+1}`;
+    const displayName = escapeHtml(rawDisplayName);
     const lockIcon = isLocked ? '&#128274;' : '&#128275;';
     const lockTitle = isLocked ? 'Locked — will not change on re-allocate' : 'Unlocked — click to lock';
     const lockedStyle = isLocked ? 'opacity:0.9;border-style:double;border-width:3px;' : '';
-    html += `<div class="group-card" data-gi="${gi}"
+    html += `<div class="group-card" data-gi="${gi}" role="region" aria-label="${escapeAttr(rawDisplayName)} with ${g.length} students"
       style="background:${GROUP_COLORS[ci]};border-color:${GROUP_BORDERS[ci]};${lockedStyle}"
       ondragover="event.preventDefault();this.classList.add('drag-over')"
       ondragleave="this.classList.remove('drag-over')"
       ondrop="dropStudent(event,${gi});this.classList.remove('drag-over')">
       <h3 style="color:${GROUP_TEXT_COLORS[ci]};display:flex;align-items:center;gap:6px;">
         <span class="group-name-editable" contenteditable="true" spellcheck="false"
-          style="outline:none;border-bottom:1px dashed rgba(255,255,255,0.15);padding:0 2px;min-width:40px;"
+          role="textbox" aria-label="Group name"
+          style="outline:none;border-bottom:1px dashed rgba(255,255,255,0.15);padding:0 2px;min-width:40px;max-width:240px;display:inline-block;overflow-wrap:anywhere;"
           onblur="renameGroup(${gi}, this.textContent)"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">${displayName}</span>
         <span class="group-count">${g.length}</span>
         <span class="group-score">${score}%</span>
-        <span style="margin-left:auto;cursor:pointer;font-size:0.75rem;opacity:0.7;" title="${lockTitle}" onclick="event.stopPropagation();toggleLockGroup(${gi})">${lockIcon}</span>
+        <span role="button" tabindex="0" aria-label="${isLocked ? 'Unlock' : 'Lock'} group" aria-pressed="${isLocked}"
+          style="margin-left:auto;cursor:pointer;font-size:0.75rem;opacity:0.7;" title="${lockTitle}"
+          onclick="event.stopPropagation();toggleLockGroup(${gi})"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();toggleLockGroup(${gi});}">${lockIcon}</span>
       </h3>`;
 
     g.forEach((sid, si) => {
@@ -1714,16 +1945,21 @@ function renderGroups() {
           else if (isInNeg) cls += ' pref-negative-in';
         }
       }
-      const pinIcon = isPinned ? `<span style="font-size:0.6rem;margin-left:3px;cursor:pointer;opacity:0.8;" title="Pinned — click to unpin" onclick="event.stopPropagation();togglePinStudent('${sid}')">&#128204;</span>` : '';
-      html += `<span class="${cls}" draggable="true" data-sid="${sid}" data-gi="${gi}" data-si="${si}"
-        ondragstart="dragStart(event,'${sid}')"
+      const safeSid = escapeAttr(sid);
+      const rawName = students.find(s => s.id === sid)?.name || sid;
+      const pinIcon = isPinned ? `<span role="button" tabindex="0" aria-label="Unpin ${escapeAttr(rawName)}" style="font-size:0.6rem;margin-left:3px;cursor:pointer;opacity:0.8;" title="Pinned — click to unpin" onclick="event.stopPropagation();togglePinStudent('${safeSid}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();togglePinStudent('${safeSid}');}">&#128204;</span>` : '';
+      const chipAriaLabel = `${rawName}${isPinned ? ' (pinned)' : ''} in ${rawDisplayName}. Press Enter to select, Space to pin.`;
+      html += `<span class="${cls}" draggable="true" data-sid="${safeSid}" data-gi="${gi}" data-si="${si}"
+        role="button" tabindex="0" aria-label="${escapeAttr(chipAriaLabel)}" aria-pressed="${activeId === sid}"
+        ondragstart="dragStart(event,'${safeSid}')"
         ondragend="dragEnd(event)"
         ondragover="event.preventDefault();chipDragOver(event,${gi},${si})"
         ondrop="chipDrop(event,${gi},${si})"
-        onclick="selectStudent('${sid}')"
-        oncontextmenu="event.preventDefault();togglePinStudent('${sid}')"
+        onclick="selectStudent('${safeSid}')"
+        oncontextmenu="event.preventDefault();togglePinStudent('${safeSid}')"
+        onkeydown="handleChipKey(event,'${safeSid}',${gi},${si})"
         style="color:${GROUP_TEXT_COLORS[ci]};">
-        <span class="chip-dot" style="background:${GROUP_DOT_COLORS[ci]};"></span>
+        <span class="chip-dot" style="background:${GROUP_DOT_COLORS[ci]};" aria-hidden="true"></span>
         ${getName(sid)}${pinIcon}
       </span>`;
     });
@@ -1841,8 +2077,67 @@ function togglePinStudent(sid) {
   renderGroups();
 }
 
+// Keyboard handler for student chips:
+//   Enter           -> select / deselect
+//   Space           -> pin / unpin
+//   Arrow keys      -> move focus to neighbouring chip
+//   Ctrl/Cmd + ←/→  -> move student to previous / next group
+function handleChipKey(e, sid, gi, si) {
+  const key = e.key;
+  // Move between groups
+  if ((e.ctrlKey || e.metaKey) && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    e.preventDefault();
+    const targetGi = key === 'ArrowLeft' ? gi - 1 : gi + 1;
+    if (targetGi < 0 || targetGi >= groups.length) return;
+    if (lockedGroups[gi] || lockedGroups[targetGi] || lockedStudents.has(sid)) return;
+    // Remove from current group, add to target
+    groups[gi] = groups[gi].filter(x => x !== sid);
+    groups[targetGi].push(sid);
+    cleanupEmptyGroups();
+    renderGroups(); renderInsights();
+    // Restore focus to moved chip after re-render
+    setTimeout(() => {
+      const el = document.querySelector(`.student-chip[data-sid="${CSS.escape(sid)}"]`);
+      if (el) el.focus();
+    }, 0);
+    return;
+  }
+  if (key === 'Enter') {
+    e.preventDefault();
+    selectStudent(sid);
+    setTimeout(() => {
+      const el = document.querySelector(`.student-chip[data-sid="${CSS.escape(sid)}"]`);
+      if (el) el.focus();
+    }, 0);
+    return;
+  }
+  if (key === ' ') {
+    e.preventDefault();
+    togglePinStudent(sid);
+    setTimeout(() => {
+      const el = document.querySelector(`.student-chip[data-sid="${CSS.escape(sid)}"]`);
+      if (el) el.focus();
+    }, 0);
+    return;
+  }
+  if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown') {
+    e.preventDefault();
+    const chips = Array.from(document.querySelectorAll('.student-chip'));
+    const currentIdx = chips.findIndex(c => c.dataset.sid === sid);
+    if (currentIdx < 0) return;
+    let nextIdx = currentIdx;
+    if (key === 'ArrowLeft' || key === 'ArrowUp') nextIdx = Math.max(0, currentIdx - 1);
+    else nextIdx = Math.min(chips.length - 1, currentIdx + 1);
+    chips[nextIdx]?.focus();
+  }
+}
+
 function renameGroup(gi, newName) {
-  groupNames[gi] = newName.trim() || `Group ${gi+1}`;
+  // Cap length to prevent absurdly long names from breaking layout, and re-render
+  // so the contenteditable span shows the canonical (escaped) value.
+  const trimmed = String(newName || '').trim().slice(0, 80);
+  groupNames[gi] = trimmed || `Group ${gi+1}`;
+  renderGroups();
 }
 
 function toggleLockGroup(gi) {
@@ -2143,7 +2438,7 @@ function toggleNetworkNames() {
 function renderInsights() {
   const container = document.getElementById('insightsView');
   if (!groups.length) return;
-  const getName = id => students.find(s => s.id === id)?.name || id;
+  const getName = id => escapeHtml(students.find(s => s.id === id)?.name || id);
 
   let totalPrefs = 0, satisfiedPrefs = 0;
   let posTotal = 0, posSatisfied = 0, negTotal = 0, negSatisfied = 0;
@@ -2271,7 +2566,7 @@ function renderInsights() {
     html += `<div class="insight-card">
       <h4 style="color:#fcd34d;">Socially Isolated</h4>
       <div class="detail">No preferences given or received</div>
-      <ul>${isolated.map(s => `<li>${s.name}</li>`).join('')}</ul>
+      <ul>${isolated.map(s => `<li>${escapeHtml(s.name)}</li>`).join('')}</ul>
     </div>`;
   }
 
@@ -2478,7 +2773,16 @@ function saveLayout() {
   layouts.unshift(layout);
   // Keep max 20 layouts
   if (layouts.length > 20) layouts.length = 20;
-  localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  let result = safeSetItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  // If quota exceeded, try shedding the oldest layout(s) until it fits.
+  while (!result.ok && layouts.length > 1) {
+    layouts.pop();
+    result = safeSetItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  }
+  if (!result.ok) {
+    alert(result.message);
+    return;
+  }
   alert(`Layout "${name}" saved.`);
 }
 
@@ -2508,8 +2812,8 @@ function showLoadLayoutMenu(event) {
           onmouseover="this.style.background='rgba(99,102,241,0.1)'" onmouseout="this.style.background='transparent'"
           onclick="loadLayout(${i});this.closest('#layoutMenuRoot').remove()">
           <div style="flex:1;">
-            <div style="color:#c4c8e0;font-weight:500;">${l.name}</div>
-            <div style="color:#454868;font-size:0.68rem;">${dateStr} &middot; ${studentCount} students &middot; ${groupCount} groups</div>
+            <div style="color:#c4c8e0;font-weight:500;">${escapeHtml(l.name)}</div>
+            <div style="color:#454868;font-size:0.68rem;">${escapeHtml(dateStr)} &middot; ${studentCount} students &middot; ${groupCount} groups</div>
           </div>
           <button style="background:none;border:none;color:#3a2020;cursor:pointer;font-size:0.85rem;padding:2px 4px;transition:color 0.15s;"
             onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#3a2020'"
@@ -2552,8 +2856,31 @@ function deleteLayout(index) {
   const name = layouts[index]?.name || 'this layout';
   if (!confirm(`Delete "${name}"?`)) return;
   layouts.splice(index, 1);
-  localStorage.setItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  const result = safeSetItem(LAYOUTS_KEY, JSON.stringify(layouts));
+  if (!result.ok) alert(result.message);
 }
+
+// ============ AUTO-RUN TESTS ============
+// Open with ?test=1 to run scoring tests on load (results in console).
+(function autoRunTests() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('test') === '1') {
+      const summary = runScoringTests();
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99999;padding:10px 16px;border-radius:10px;font-family:Inter,sans-serif;font-size:0.85rem;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,0.4);';
+      if (summary.failed === 0) {
+        banner.style.background = '#10b981'; banner.style.color = '#fff';
+        banner.textContent = `✓ ${summary.passed}/${summary.total} scoring tests passed`;
+      } else {
+        banner.style.background = '#ef4444'; banner.style.color = '#fff';
+        banner.textContent = `✗ ${summary.failed} of ${summary.total} scoring tests failed — see console`;
+      }
+      document.body.appendChild(banner);
+      setTimeout(() => banner.remove(), 8000);
+    }
+  } catch (e) { console.error('Test runner error:', e); }
+})();
 </script>
 </body>
 </html>
