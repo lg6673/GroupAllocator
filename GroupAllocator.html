@@ -975,7 +975,18 @@
   .insight-card li span[style*="#f87171"],
   .insight-card li span[style*="#ef4444"] { color: var(--clay-ink) !important; }
   .insight-card li span[style*="#fbbf24"],
-  .insight-card li span[style*="#f59e0b"] { color: oklch(0.55 0.12 70) !important; }
+  .insight-card li span[style*="#f59e0b"],
+  .insight-card li span[style*="#fcd34d"] { color: oklch(0.55 0.12 70) !important; }
+  /* Inline colors on insight-card titles ("Socially Isolated" #fcd34d, etc.)
+     have no rule with !important and would otherwise win over the h4 default —
+     amber on white card is ~1.4:1, illegible. Force the canonical h4 ink. */
+  .insight-card h4[style*="color:"] { color: var(--ink-4) !important; }
+  .insight-card h4[style*="#fb923c"],
+  .insight-card h4[style*="#fcd34d"] { color: oklch(0.55 0.12 70) !important; }
+  .insight-card h4[style*="#34d399"],
+  .insight-card h4[style*="#10b981"] { color: var(--sage-ink) !important; }
+  .insight-card h4[style*="#f87171"],
+  .insight-card h4[style*="#ef4444"] { color: var(--clay-ink) !important; }
 
   .stat-bar {
     height: 3px;
@@ -1412,6 +1423,33 @@
 @keyframes toast-in  { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes toast-out { to   { transform: translateY(8px); opacity: 0; } }
 
+/* ===== "NEW GROUP" DROP ZONE =====
+   Distinct from .group-card so the Studio !important rules for real group
+   cards don't flatten the dashed-border affordance or the drag-over feedback. */
+.group-card-new {
+  background: var(--paper-2, #f5f1e8);
+  border: 1.5px dashed var(--rule, #e7e1d3);
+  border-radius: 14px;
+  padding: 14px;
+  min-height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.group-card-new > span {
+  font-family: 'Newsreader', serif; font-style: italic; font-weight: 400;
+  font-size: 0.92rem; color: var(--ink-3, #6a655c);
+  letter-spacing: 0.005em;
+}
+.group-card-new.drag-over {
+  background: var(--card, #fff);
+  border-color: var(--ink, #1c1a17);
+  border-style: solid;
+  box-shadow: 0 0 0 3px rgba(28,26,23,0.08);
+  transform: translateY(-1px);
+}
+.group-card-new.drag-over > span { color: var(--ink, #1c1a17); }
+
 /* ===== POP ANIMATIONS for lock/pin ===== */
 @keyframes la-pop { 0% { transform: scale(1); } 50% { transform: scale(1.3); } 100% { transform: scale(1); } }
 .lock-pop, .pin-pop { animation: la-pop 220ms ease-out; }
@@ -1540,9 +1578,9 @@
             <div class="legend-item"><div class="legend-line" style="background:var(--clay-ink);"></div> Wants to avoid</div>
             <div class="legend-item"><div class="legend-line" style="background:var(--sage-ink);height:5px;"></div> Mutual positive</div>
             <div class="legend-item"><div class="legend-line" style="background:var(--clay-ink);height:5px;"></div> Mutual negative</div>
-            <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
-              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.73rem;color:#8b8fb0;">
-                <input type="checkbox" id="networkNameToggle" checked onchange="toggleNetworkNames()" style="accent-color:#6366f1;">
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--rule,#e7e1d3);">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:0.73rem;color:var(--ink-3,#6a655c);">
+                <input type="checkbox" id="networkNameToggle" checked onchange="toggleNetworkNames()" style="accent-color:var(--ink,#1c1a17);">
                 Show names
               </label>
             </div>
@@ -2157,19 +2195,26 @@ function executeImport(targetId, forceImport, importMode) {
   const { rows } = parsedSheetData;
   const nameList = [];
   rows.forEach(row => {
-    const name = String(row[columnMapping.name] || '').trim();
+    // Apply the same 80-char cap addStudent() uses, so pass-2 lookups below
+    // resolve against the canonical stored name rather than the original
+    // (potentially longer) cell value.
+    const name = String(row[columnMapping.name] || '').trim().slice(0, 80);
     if (name) { addStudent(name); nameList.push(name); }
   });
-  let prefsSet = 0, skipped = 0;
+  let prefsSet = 0, skipped = 0, truncated = 0;
   rows.forEach(row => {
-    const name = String(row[columnMapping.name] || '').trim();
-    if (!name) return;
+    const rawName = String(row[columnMapping.name] || '').trim();
+    if (!rawName) return;
+    const name = rawName.slice(0, 80);
+    if (rawName.length > 80) truncated++;
     const student = students.find(s => s.name.toLowerCase() === name.toLowerCase());
     if (!student) return;
     [['positive', columnMapping.positive], ['negative', columnMapping.negative]].forEach(([type, col]) => {
       if (col < 0) return;
       splitPreferenceNames(String(row[col] || '')).forEach(pn => {
-        const target = students.find(s => s.name.toLowerCase() === pn.toLowerCase());
+        // Mirror the 80-char cap on the peer-target lookup as well.
+        const pnCapped = pn.slice(0, 80);
+        const target = students.find(s => s.name.toLowerCase() === pnCapped.toLowerCase());
         if (target && target.id !== student.id && !preferences[student.id][type].includes(target.id)) {
           preferences[student.id][type].push(target.id); prefsSet++;
         } else if (!target && pn) { skipped++; }
@@ -2180,6 +2225,7 @@ function executeImport(targetId, forceImport, importMode) {
   const modeLabel = importMode === 'fresh' ? 'Fresh import' : importMode === 'append' ? 'Added' : 'Imported';
   let msg = `${modeLabel}: ${nameList.length} students with ${prefsSet} preferences.`;
   if (skipped > 0) msg += ` (${skipped} unmatched preference${skipped > 1 ? 's' : ''} skipped)`;
+  if (truncated > 0) msg += ` (${truncated} name${truncated > 1 ? 's' : ''} shortened to 80 chars)`;
   showImportStatus('success', msg);
   setTimeout(() => hideImportModal(), 1500);
   parsedSheetData = null;
@@ -2640,18 +2686,27 @@ function hideLoading() {
 // Public entry: show spinner, yield to the browser, then run the allocation.
 // For tiny problems (< 12 students) the work is fast enough that we skip the
 // overlay flicker entirely.
+let _allocInflight = false;
 function allocateGroups() {
+  // Guard against re-entry during the RAF chain — keyboard repeat and fast
+  // double-clicks can otherwise queue a second allocation that fires after
+  // the spinner has been dismissed, visibly reshuffling groups.
+  if (_allocInflight) return;
   if (students.length < 2) return;
   const heavy = students.length >= 12;
   if (heavy) {
+    _allocInflight = true;
     showLoading('Allocating groups…', `Optimizing ${students.length} students into groups`);
     // Two RAF + setTimeout to guarantee the overlay paints before the
     // synchronous allocator blocks the main thread.
     requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
-      try { _allocateGroupsImpl(); } finally { hideLoading(); }
+      try { _allocateGroupsImpl(); }
+      finally { hideLoading(); _allocInflight = false; }
     }, 0)));
   } else {
-    _allocateGroupsImpl();
+    _allocInflight = true;
+    try { _allocateGroupsImpl(); }
+    finally { _allocInflight = false; }
   }
 }
 
@@ -2915,12 +2970,14 @@ function renderGroups() {
     html += '</div>';
   });
 
-  // "New Group" drop zone
-  html += `<div class="group-card" style="background:rgba(255,255,255,0.015);border:2px dashed rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;min-height:80px;cursor:default;transition:all 0.2s;"
-    ondragover="event.preventDefault();this.style.borderColor='rgba(99,102,241,0.5)';this.style.background='rgba(99,102,241,0.06)';"
-    ondragleave="this.style.borderColor='rgba(255,255,255,0.08)';this.style.background='rgba(255,255,255,0.015)';"
-    ondrop="dropToNewGroup(event);this.style.borderColor='rgba(255,255,255,0.08)';this.style.background='rgba(255,255,255,0.015)';">
-    <span style="color:#454868;font-size:0.82rem;font-weight:500;">+ Drop here to create new group</span>
+  // "New Group" drop zone — uses its own class (not .group-card) so the
+  // Studio !important rules for real group cards don't override the dashed
+  // affordance and drag-over feedback.
+  html += `<div class="group-card-new"
+    ondragover="event.preventDefault();this.classList.add('drag-over')"
+    ondragleave="this.classList.remove('drag-over')"
+    ondrop="dropToNewGroup(event);this.classList.remove('drag-over')">
+    <span>+ Drop here to create new group</span>
   </div>`;
   html += '</div>';
   container.innerHTML = html;
@@ -3094,10 +3151,13 @@ function handleChipKey(e, sid, gi, si) {
 
 function renameGroup(gi, newName) {
   // Cap length to prevent absurdly long names from breaking layout, and re-render
-  // so the contenteditable span shows the canonical (escaped) value.
+  // so the contenteditable span shows the canonical (escaped) value. Defer the
+  // re-render past the current event loop tick — blur fires synchronously
+  // before a click on an adjacent control completes, and a synchronous render
+  // would destroy the mousedown target and swallow the click.
   const trimmed = String(newName || '').trim().slice(0, 80);
   groupNames[gi] = trimmed || `Group ${gi+1}`;
-  renderGroups();
+  setTimeout(renderGroups, 0);
 }
 
 function toggleLockGroup(gi) {
@@ -3800,19 +3860,32 @@ function confirmSaveLayout() {
   };
 
   const layouts = getSavedLayouts();
+  const startCount = layouts.length;
   layouts.unshift(layout);
-  if (layouts.length > 20) layouts.length = 20;
+  // The 20-cap eviction is its own (expected) drop and shouldn't be reported.
+  let capDropped = 0;
+  if (layouts.length > 20) { capDropped = layouts.length - 20; layouts.length = 20; }
+  const lengthAfterCap = layouts.length;
   let result = safeSetItem(LAYOUTS_KEY, JSON.stringify(layouts));
   while (!result.ok && layouts.length > 1) {
     layouts.pop();
     result = safeSetItem(LAYOUTS_KEY, JSON.stringify(layouts));
   }
+  // Evictions caused by quota pressure (beyond the 20-cap) are surfaced so
+  // the user knows their older saved layouts were dropped to make room.
+  const quotaEvicted = lengthAfterCap - layouts.length;
   closeSaveLayoutDialog();
   if (!result.ok) {
     showToast('Could not save', result.message, 'error');
     return;
   }
-  showToast('Layout saved', `"${name}" is in your saved list.`, 'success');
+  if (quotaEvicted > 0) {
+    showToast('Layout saved (storage was full)',
+      `Removed ${quotaEvicted} older layout${quotaEvicted === 1 ? '' : 's'} to make room for "${name}".`,
+      'success');
+  } else {
+    showToast('Layout saved', `"${name}" is in your saved list.`, 'success');
+  }
 }
 
 function showLoadLayoutMenu(event) {
@@ -3913,6 +3986,19 @@ function confirmDeleteLayout() {
     showToast('Layout deleted', `"${removed?.name || 'Layout'}" is gone.`, 'success');
   }
 }
+
+// ============ GLOBAL ESCAPE HANDLER ============
+// Native dialogs honoured Escape; the custom .confirm-overlay overlays didn't.
+// Close the topmost open overlay on Escape so save/delete/import dialogs all
+// dismiss consistently regardless of where focus currently sits.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const open = document.querySelectorAll('.confirm-overlay.show');
+  if (!open.length) return;
+  open[open.length - 1].classList.remove('show');
+  // Reset transient state for the dialogs that track it.
+  if (open[open.length - 1].id === 'deleteLayoutOverlay') _pendingDeleteIndex = -1;
+});
 
 // ============ AUTO-RUN TESTS ============
 // Open with ?test=1 to run scoring tests on load (results in console).
