@@ -561,6 +561,20 @@
     <div class="sidebar-section">
       <h3>Set Preferences</h3>
       <div class="input-group">
+        <label>Preference limits per student</label>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="flex:1;">
+            <div style="font-size:0.68rem;color:#34d399;margin-bottom:3px;font-weight:500;">Positive</div>
+            <input type="number" id="prefLimitPositive" value="0" min="0" max="20" style="width:100%;text-align:center;" onchange="updatePrefLimits();renderPrefEditor()">
+          </div>
+          <div style="flex:1;">
+            <div style="font-size:0.68rem;color:#f87171;margin-bottom:3px;font-weight:500;">Negative</div>
+            <input type="number" id="prefLimitNegative" value="0" min="0" max="20" style="width:100%;text-align:center;" onchange="updatePrefLimits();renderPrefEditor()">
+          </div>
+        </div>
+        <div class="help-text">0 = unlimited. Limits apply to manual editing and imports.</div>
+      </div>
+      <div class="input-group">
         <label>Select Student</label>
         <select id="prefStudent" onchange="renderPrefEditor()">
           <option value="">-- Choose student --</option>
@@ -887,7 +901,8 @@ function bulkImport() {
 }
 
 let parsedSheetData = null;
-let columnMapping = { name: -1, positive: -1, negative: -1 };
+let columnMapping = { name: -1, positive: [], negative: [] };
+let prefLimits = { positive: 0, negative: 0 };
 
 function handleFileDrop(e) {
   e.preventDefault();
@@ -944,32 +959,52 @@ function parsePastedData() {
 function renderColumnMapper(targetId) {
   if (!parsedSheetData) return;
   const { headers } = parsedSheetData;
-  columnMapping = { name: -1, positive: -1, negative: -1 };
+  columnMapping = { name: -1, positive: [], negative: [] };
   headers.forEach((h, i) => {
     const hl = h.toLowerCase();
     if (columnMapping.name === -1 && (hl.includes('name') || hl.includes('student') || hl === 'full name' || hl === 'respondent')) columnMapping.name = i;
-    if (columnMapping.positive === -1 && (hl.includes('work with') || hl.includes('want to be with') || hl.includes('prefer') || hl.includes('positive') || hl.includes('like') || hl.includes('choose') || hl.includes('for'))) columnMapping.positive = i;
-    if (columnMapping.negative === -1 && (hl.includes('avoid') || hl.includes('not want') || hl.includes("don't want") || hl.includes('negative') || hl.includes('against') || hl.includes('away from'))) columnMapping.negative = i;
+    if (hl.includes('work with') || hl.includes('want to be with') || hl.includes('prefer') || hl.includes('positive') || hl.includes('like') || hl.includes('choose') || hl.includes('for')) columnMapping.positive.push(i);
+    if (hl.includes('avoid') || hl.includes('not want') || hl.includes("don't want") || hl.includes('negative') || hl.includes('against') || hl.includes('away from')) columnMapping.negative.push(i);
   });
   if (columnMapping.name === -1) columnMapping.name = 0;
 
+  renderColumnMapperUI(targetId);
+  updateImportPreview(targetId);
+}
+
+function renderColumnMapperUI(targetId) {
+  const { headers } = parsedSheetData;
   const optionsHtml = (sel) => '<option value="-1">-- Skip --</option>' + headers.map((h, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${escapeHtml(h || 'Column ' + (i+1))}</option>`).join('');
+
+  function renderMultiColSelectors(type, label, color) {
+    const cols = columnMapping[type];
+    let html = `<div style="grid-column:1/-1;margin-top:4px;"><label style="color:${color};">${label}</label>`;
+    cols.forEach((col, idx) => {
+      html += `<div style="display:flex;gap:4px;align-items:center;margin-bottom:4px;">
+        <select style="flex:1;" onchange="columnMapping.${type}[${idx}]=+this.value;updateImportPreview('${targetId}')">${optionsHtml(col)}</select>
+        <button class="btn btn-danger btn-sm" style="padding:3px 8px;font-size:0.7rem;" onclick="columnMapping.${type}.splice(${idx},1);renderColumnMapperUI('${targetId}');updateImportPreview('${targetId}')">×</button>
+      </div>`;
+    });
+    html += `<button class="btn btn-secondary btn-sm" style="margin-top:2px;font-size:0.7rem;" onclick="columnMapping.${type}.push(-1);renderColumnMapperUI('${targetId}')">+ Add column</button>`;
+    html += '</div>';
+    return html;
+  }
+
   const container = document.getElementById(targetId);
   container.innerHTML = `<div style="margin-top:12px;">
     <strong style="font-size:0.82rem;color:#9ca0b8;">Map your columns:</strong>
     <div class="col-mapper">
       <div><label>Student Name *</label><select onchange="columnMapping.name=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.name)}</select></div>
-      <div><label>Wants to work with</label><select onchange="columnMapping.positive=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.positive)}</select></div>
-      <div><label>Wants to avoid</label><select onchange="columnMapping.negative=+this.value;updateImportPreview('${targetId}')">${optionsHtml(columnMapping.negative)}</select></div>
+      ${renderMultiColSelectors('positive', 'Wants to work with', '#34d399')}
+      ${renderMultiColSelectors('negative', 'Wants to avoid', '#f87171')}
     </div>
-    <div class="help-text">Preferences can contain names separated by commas, semicolons, or "and".</div>
+    <div class="help-text">Preferences can contain names separated by commas, semicolons, or "and". Add multiple columns if your spreadsheet splits choices across columns (e.g. Choice 1, Choice 2, Choice 3).</div>
     <div id="${targetId}-table"></div>
     <div class="btn-row" style="margin-top:12px;">
       <button class="btn btn-success" onclick="executeImport('${targetId}')">Import All</button>
       <button class="btn btn-secondary" onclick="hideImportModal()">Cancel</button>
     </div>
   </div>`;
-  updateImportPreview(targetId);
 }
 
 function updateImportPreview(targetId) {
@@ -1015,21 +1050,23 @@ function updateImportPreview(targetId) {
     }
 
     ['positive', 'negative'].forEach(type => {
-      const col = columnMapping[type];
-      if (col < 0) return;
-      const raw = String(row[col] || '').trim();
-      if (!raw) return;
-      const prefNames = splitPreferenceNames(raw);
-      prefNames.forEach(pn => {
-        if (!nameSet.has(pn.toLowerCase())) {
-          errors.push({ col: type, type: 'unmatched', detail: pn });
-          unmatchedNames.add(pn);
-          totalErrors++;
-        }
-        if (name && pn.toLowerCase() === name.toLowerCase()) {
-          errors.push({ col: type, type: 'self-ref', detail: `${name} references themselves` });
-          selfRefs++;
-        }
+      const cols = columnMapping[type].filter(c => c >= 0);
+      if (cols.length === 0) return;
+      cols.forEach(col => {
+        const raw = String(row[col] || '').trim();
+        if (!raw) return;
+        const prefNames = splitPreferenceNames(raw);
+        prefNames.forEach(pn => {
+          if (!nameSet.has(pn.toLowerCase())) {
+            errors.push({ col: type, type: 'unmatched', detail: pn });
+            unmatchedNames.add(pn);
+            totalErrors++;
+          }
+          if (name && pn.toLowerCase() === name.toLowerCase()) {
+            errors.push({ col: type, type: 'self-ref', detail: `${name} references themselves` });
+            selfRefs++;
+          }
+        });
       });
     });
 
@@ -1092,8 +1129,10 @@ function updateImportPreview(targetId) {
   let html = summaryHtml;
   html += '<div class="preview-scroll"><table class="preview-table"><thead><tr>';
   html += '<th style="width:20px;">&nbsp;</th><th>Student Name</th>';
-  if (columnMapping.positive >= 0) html += '<th style="color:#34d399;">Wants to work with</th>';
-  if (columnMapping.negative >= 0) html += '<th style="color:#f87171;">Wants to avoid</th>';
+  const hasPosCols = columnMapping.positive.some(c => c >= 0);
+  const hasNegCols = columnMapping.negative.some(c => c >= 0);
+  if (hasPosCols) html += '<th style="color:#34d399;">Wants to work with</th>';
+  if (hasNegCols) html += '<th style="color:#f87171;">Wants to avoid</th>';
   html += '</tr></thead><tbody>';
 
   showRows.forEach((row, ri) => {
@@ -1116,13 +1155,13 @@ function updateImportPreview(targetId) {
       nameHtml = `<span style="color:${errColor};border-bottom:1px dashed ${errColor};" title="${escapeAttr(nameErrs[0].detail)}">${nameHtml}</span> <span style="font-size:0.65rem;color:${errColor};background:rgba(251,191,36,0.1);padding:1px 5px;border-radius:8px;">${errLabel}</span>`;
     }
 
-    // Preference cells with inline error highlighting
+    // Preference cells with inline error highlighting — merges all mapped columns
     function renderPrefCell(type) {
-      const col = columnMapping[type];
-      if (col < 0) return '';
-      const raw = String(row[col] || '').trim();
-      if (!raw) return '<td style="color:#4b5072;">-</td>';
-      const prefNames = splitPreferenceNames(raw);
+      const cols = columnMapping[type].filter(c => c >= 0);
+      if (cols.length === 0) return '';
+      const allRaw = cols.map(col => String(row[col] || '').trim()).filter(r => r);
+      if (allRaw.length === 0) return '<td style="color:#4b5072;">-</td>';
+      const prefNames = allRaw.flatMap(r => splitPreferenceNames(r));
       const prefErrs = errs.filter(e => e.col === type);
       const unmatchedSet = new Set(prefErrs.filter(e => e.type === 'unmatched').map(e => e.detail.toLowerCase()));
       const selfRefSet = new Set(prefErrs.filter(e => e.type === 'self-ref').map(e => name.toLowerCase()));
@@ -1144,8 +1183,8 @@ function updateImportPreview(targetId) {
     html += `<tr style="${rowStyle}">`;
     html += `<td style="text-align:center;">${icon}</td>`;
     html += `<td>${nameHtml}</td>`;
-    if (columnMapping.positive >= 0) html += renderPrefCell('positive');
-    if (columnMapping.negative >= 0) html += renderPrefCell('negative');
+    if (hasPosCols) html += renderPrefCell('positive');
+    if (hasNegCols) html += renderPrefCell('negative');
     html += '</tr>';
   });
 
@@ -1219,13 +1258,17 @@ function executeImport(targetId, forceImport, importMode) {
     if (!name) return;
     const student = students.find(s => s.name.toLowerCase() === name.toLowerCase());
     if (!student) return;
-    [['positive', columnMapping.positive], ['negative', columnMapping.negative]].forEach(([type, col]) => {
-      if (col < 0) return;
-      splitPreferenceNames(String(row[col] || '')).forEach(pn => {
-        const target = students.find(s => s.name.toLowerCase() === pn.toLowerCase());
-        if (target && target.id !== student.id && !preferences[student.id][type].includes(target.id)) {
-          preferences[student.id][type].push(target.id); prefsSet++;
-        } else if (!target && pn) { skipped++; }
+    ['positive', 'negative'].forEach(type => {
+      const cols = columnMapping[type].filter(c => c >= 0);
+      const limit = prefLimits[type];
+      cols.forEach(col => {
+        splitPreferenceNames(String(row[col] || '')).forEach(pn => {
+          if (limit > 0 && preferences[student.id][type].length >= limit) return;
+          const target = students.find(s => s.name.toLowerCase() === pn.toLowerCase());
+          if (target && target.id !== student.id && !preferences[student.id][type].includes(target.id)) {
+            preferences[student.id][type].push(target.id); prefsSet++;
+          } else if (!target && pn) { skipped++; }
+        });
       });
     });
   });
@@ -1325,14 +1368,14 @@ function applyFix(newName) {
 
   // Fix ALL occurrences of the bad name across all rows and preference columns
   ['positive', 'negative'].forEach(type => {
-    const col = columnMapping[type];
-    if (col < 0) return;
-    parsedSheetData.rows.forEach(row => {
-      const raw = String(row[col] || '');
-      if (regex.test(raw)) {
-        regex.lastIndex = 0;
-        row[col] = raw.replace(regex, newName.trim());
-      }
+    columnMapping[type].filter(c => c >= 0).forEach(col => {
+      parsedSheetData.rows.forEach(row => {
+        const raw = String(row[col] || '');
+        if (regex.test(raw)) {
+          regex.lastIndex = 0;
+          row[col] = raw.replace(regex, newName.trim());
+        }
+      });
     });
   });
 
@@ -1358,14 +1401,14 @@ function applyFixRemove() {
 
   // Remove ALL occurrences of the bad name across all rows and preference columns
   ['positive', 'negative'].forEach(type => {
-    const col = columnMapping[type];
-    if (col < 0) return;
-    parsedSheetData.rows.forEach(row => {
-      const raw = String(row[col] || '');
-      const names = splitPreferenceNames(raw);
-      if (names.some(n => n.toLowerCase() === badName.toLowerCase())) {
-        row[col] = names.filter(n => n.toLowerCase() !== badName.toLowerCase()).join(', ');
-      }
+    columnMapping[type].filter(c => c >= 0).forEach(col => {
+      parsedSheetData.rows.forEach(row => {
+        const raw = String(row[col] || '');
+        const names = splitPreferenceNames(raw);
+        if (names.some(n => n.toLowerCase() === badName.toLowerCase())) {
+          row[col] = names.filter(n => n.toLowerCase() !== badName.toLowerCase()).join(', ');
+        }
+      });
     });
   });
 
@@ -1401,13 +1444,14 @@ function getImportIssues() {
         issues.push({ type: 'duplicate', detail: `"${name}" appears ${nameCounts[name.toLowerCase()]} times`, name: name.toLowerCase() });
     }
     ['positive', 'negative'].forEach(type => {
-      const col = columnMapping[type];
-      if (col < 0) return;
-      splitPreferenceNames(String(row[col] || '')).forEach(pn => {
-        if (!nameSet.has(pn.toLowerCase()))
-          issues.push({ type: 'unmatched', detail: `"${pn}" (in ${name}'s ${type === 'positive' ? 'work with' : 'avoid'} list) not found — will be skipped` });
-        if (name && pn.toLowerCase() === name.toLowerCase())
-          issues.push({ type: 'self-ref', detail: `${name} references themselves — will be ignored` });
+      const cols = columnMapping[type].filter(c => c >= 0);
+      cols.forEach(col => {
+        splitPreferenceNames(String(row[col] || '')).forEach(pn => {
+          if (!nameSet.has(pn.toLowerCase()))
+            issues.push({ type: 'unmatched', detail: `"${pn}" (in ${name}'s ${type === 'positive' ? 'work with' : 'avoid'} list) not found — will be skipped` });
+          if (name && pn.toLowerCase() === name.toLowerCase())
+            issues.push({ type: 'self-ref', detail: `${name} references themselves — will be ignored` });
+        });
       });
     });
   });
@@ -1465,24 +1509,48 @@ function renderPrefEditor() {
   const pref = preferences[sid];
   const others = students.filter(s => s.id !== sid);
   const getName = id => escapeHtml(students.find(s => s.id === id)?.name || '');
+  const posLimit = prefLimits.positive;
+  const negLimit = prefLimits.negative;
+  const posAtLimit = posLimit > 0 && pref.positive.length >= posLimit;
+  const negAtLimit = negLimit > 0 && pref.negative.length >= negLimit;
+  const posCountLabel = posLimit > 0 ? ` (${pref.positive.length}/${posLimit})` : '';
+  const negCountLabel = negLimit > 0 ? ` (${pref.negative.length}/${negLimit})` : '';
+
   let html = '<div class="pref-editor">';
-  html += '<div style="margin-bottom:10px;"><strong style="color:#34d399;font-size:0.78rem;font-weight:600;">WANTS TO WORK WITH</strong>';
+  html += `<div style="margin-bottom:10px;"><strong style="color:#34d399;font-size:0.78rem;font-weight:600;">WANTS TO WORK WITH${posCountLabel}</strong>`;
   pref.positive.forEach((pid, i) => {
     html += `<div class="pref-row"><span class="pref-badge-pos">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${escapeAttr(sid)}','positive',${i})">Remove</button></div>`;
   });
-  const posOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
-  html += `<div class="pref-row"><select id="addPosSelect"><option value="">+ Add...</option>${posOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-success btn-sm" onclick="addPref('${escapeAttr(sid)}','positive')">Add</button></div></div>`;
-  html += '<div><strong style="color:#f87171;font-size:0.78rem;font-weight:600;">WANTS TO AVOID</strong>';
+  if (!posAtLimit) {
+    const posOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
+    html += `<div class="pref-row"><select id="addPosSelect"><option value="">+ Add...</option>${posOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-success btn-sm" onclick="addPref('${escapeAttr(sid)}','positive')">Add</button></div>`;
+  } else {
+    html += `<div style="font-size:0.72rem;color:#4b5072;margin-top:4px;font-style:italic;">Limit reached</div>`;
+  }
+  html += '</div>';
+  html += `<div><strong style="color:#f87171;font-size:0.78rem;font-weight:600;">WANTS TO AVOID${negCountLabel}</strong>`;
   pref.negative.forEach((pid, i) => {
     html += `<div class="pref-row"><span class="pref-badge-neg">${getName(pid)}</span><button class="btn btn-danger btn-sm" onclick="removePref('${escapeAttr(sid)}','negative',${i})">Remove</button></div>`;
   });
-  const negOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
-  html += `<div class="pref-row"><select id="addNegSelect"><option value="">+ Add...</option>${negOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-danger btn-sm" onclick="addPref('${escapeAttr(sid)}','negative')">Add</button></div></div>`;
+  if (!negAtLimit) {
+    const negOpts = others.filter(o => !pref.positive.includes(o.id) && !pref.negative.includes(o.id));
+    html += `<div class="pref-row"><select id="addNegSelect"><option value="">+ Add...</option>${negOpts.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-danger btn-sm" onclick="addPref('${escapeAttr(sid)}','negative')">Add</button></div>`;
+  } else {
+    html += `<div style="font-size:0.72rem;color:#4b5072;margin-top:4px;font-style:italic;">Limit reached</div>`;
+  }
+  html += '</div>';
   html += '</div>';
   area.innerHTML = html;
 }
 
+function updatePrefLimits() {
+  prefLimits.positive = parseInt(document.getElementById('prefLimitPositive').value) || 0;
+  prefLimits.negative = parseInt(document.getElementById('prefLimitNegative').value) || 0;
+}
+
 function addPref(sid, type) {
+  const limit = prefLimits[type];
+  if (limit > 0 && preferences[sid][type].length >= limit) return;
   const val = document.getElementById(type === 'positive' ? 'addPosSelect' : 'addNegSelect').value;
   if (!val) return;
   preferences[sid][type].push(val);
